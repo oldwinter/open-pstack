@@ -1,6 +1,6 @@
 ---
 name: pstack-opus-low
-description: Native Claude lane for pstack roles configured as claude:opus@low.
+description: Native Claude lane for pstack roles configured as claude[anthropic]:opus@low.
 model: opus
 effort: low
 background: true

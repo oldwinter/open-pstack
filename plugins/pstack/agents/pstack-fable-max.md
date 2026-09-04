@@ -1,6 +1,6 @@
 ---
 name: pstack-fable-max
-description: Native Claude lane for pstack roles configured as claude:fable@max.
+description: Native Claude lane for pstack roles configured as claude[anthropic]:fable@max.
 model: fable
 effort: max
 background: true

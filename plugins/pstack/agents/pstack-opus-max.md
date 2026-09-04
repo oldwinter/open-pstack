@@ -1,6 +1,6 @@
 ---
 name: pstack-opus-max
-description: Native Claude lane for pstack roles configured as claude:opus@max.
+description: Native Claude lane for pstack roles configured as claude[anthropic]:opus@max.
 model: opus
 effort: max
 background: true

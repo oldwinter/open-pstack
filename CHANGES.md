@@ -2,6 +2,12 @@
 
 This port applies the Cursor → Claude Code substitutions in skill bodies. Earlier drafts left them flagged; this revision resolves them. A later pass added a Codex build that shares the same skills; see [Codex port](#codex-port) below.
 
+## 1.4.0-oldwinter.1 adds typed custom-provider routes
+
+Model sheets and runner receipts now use schema 2 targets that separate the execution harness, API provider, model, and requested effort. Claude projects an exact, frozen allowlist from `~/.claude/settings.json` for relay configuration without persisting values. Codex can pin a named provider in argv, Grok preflight follows its documented authentication banners and exact available-model rows, and vanilla Pi 0.84.4 adds a read-only JSONL lane with provider/model and terminal-state verification. Every route remains parent-owned, preflighted without fallback, and recorded in a schema 2 receipt whose configuration evidence is redacted.
+
+The setup skill migrates released schema 1 descriptors in memory, preserves valid custom routes, probes every distinct target, and writes only after complete validation and confirmation. The runner retains exclusive `0600` reservations, absolute deadlines, cancellation receipts, Claude rolling-alias verification, and Grok's single unauthenticated preflight retry. This fork uses version `1.4.0-oldwinter.1`, marketplace `oldwinter-open-pstack`, and plugin ID `pstack@oldwinter-open-pstack` so it can be evaluated beside the upstream distribution.
+
 ## 1.3.0 syncs to Cursor pstack 0.14.7
 
 Open Pstack now tracks Cursor pstack 0.14.7 at `efa2a531985e0a8084d36ff3cf87233be8a9f34b`.
@@ -24,7 +30,7 @@ Origin merge commands omit GitHub's unsupported `--squash` flag and stop when Or
 
 **No-op upstream revisions.** Upstream moved several Fable references to a newer revision slug. Open Pstack already stores rolling `claude:fable` and `claude:opus` aliases, so those edits require no port change.
 
-**Upstream-only exclusions.** `make-bot-ui` from `799151d` and `6fecddb` is not ported because it is built entirely from Cursor routine, webhook, and UI primitives. The `disable-model-invocation` additions from `73f8be4` are not applied to `how`, `why`, `unslop`, or `typescript-best-practices`; the flag would break poteto-mode's named invocation path on Claude Code. The `23a56e2` defaults that move `bug-fix`, `perf-issue`, and `hillclimb` from Sol to Fable are not applied because Fable costs much more for these frequent delegated code roles; all three stay on `codex:gpt-5.6-sol@max`. The Claude manifest logo field from `efa2a53` is also omitted because Claude Code has no schema for it.
+**Upstream-only exclusions.** `make-bot-ui` from `799151d` and `6fecddb` is not ported because it is built entirely from Cursor routine, webhook, and UI primitives. The `disable-model-invocation` additions from `73f8be4` are not applied to `how`, `why`, `unslop`, or `typescript-best-practices`; the flag would break poteto-mode's named invocation path on Claude Code. The `23a56e2` defaults that move `bug-fix`, `perf-issue`, and `hillclimb` from Sol to Fable are not applied because Fable costs much more for these frequent delegated code roles; all three stay on `codex[openai]:gpt-5.6-sol@max`. The Claude manifest logo field from `efa2a53` is also omitted because Claude Code has no schema for it.
 
 ## 1.2.1 keeps Fable and Opus on their latest Claude revisions
 

@@ -1,8 +1,8 @@
 # open-pstack
 
-[![CI](https://github.com/ericlitman/open-pstack/actions/workflows/ci.yml/badge.svg)](https://github.com/ericlitman/open-pstack/actions/workflows/ci.yml)
-[![Latest release](https://img.shields.io/github/v/release/ericlitman/open-pstack)](https://github.com/ericlitman/open-pstack/releases/latest)
-[![MIT license](https://img.shields.io/github/license/ericlitman/open-pstack)](LICENSE)
+[![CI](https://github.com/oldwinter/open-pstack/actions/workflows/ci.yml/badge.svg)](https://github.com/oldwinter/open-pstack/actions/workflows/ci.yml)
+[![Latest release](https://img.shields.io/github/v/release/oldwinter/open-pstack)](https://github.com/oldwinter/open-pstack/releases/latest)
+[![MIT license](https://img.shields.io/github/license/oldwinter/open-pstack)](LICENSE)
 
 **Open Pstack brings [Lauren Tan (@poteto)](https://x.com/poteto)'s [pstack](https://github.com/cursor/plugins/tree/main/pstack) to Claude Code and Codex.** Its job is to stay as close to her original work as possible while translating the parts that depend on Cursor.
 
@@ -32,15 +32,15 @@ pstack does not ask you to trust an agent on day one. It helps the agent leave e
 
 ## Install
 
-You need a current Claude Code or Codex installation. For the full four-model review, install and sign in to the Claude Code, Codex, and Grok command-line tools. [Bun](https://bun.sh) runs the small local tool that starts models outside the app you are using. You can still use the core workflows with fewer models.
+You need a current Claude Code or Codex installation. Install and authenticate the command-line harnesses named in your model sheet: Claude Code, Codex, Grok Build, or vanilla Pi 0.84.4. [Bun](https://bun.sh) runs the small local tool that starts models outside the app you are using. You can still use the core workflows with fewer models.
 
 ### Claude Code
 
 Run these commands inside Claude Code:
 
 ```text
-/plugin marketplace add ericlitman/open-pstack
-/plugin install pstack@open-pstack
+/plugin marketplace add oldwinter/open-pstack
+/plugin install pstack@oldwinter-open-pstack
 /reload-plugins
 ```
 
@@ -49,8 +49,8 @@ Run these commands inside Claude Code:
 Run these commands in your shell:
 
 ```shell
-codex plugin marketplace add ericlitman/open-pstack --ref main
-codex plugin add pstack@open-pstack
+codex plugin marketplace add oldwinter/open-pstack --ref main
+codex plugin add pstack@oldwinter-open-pstack
 ```
 
 Turn on Codex subagents in `~/.codex/config.toml` so pstack can compare work in parallel:
@@ -80,9 +80,9 @@ In Codex, ask:
 Use pstack:setup-pstack to configure pstack.
 ```
 
-Setup checks the models you can actually run, shows how each one will start, and asks before saving the choices. The current default group uses Fable, GPT-5.6 Sol, Grok 4.6, and Opus.
+Setup checks the exact execution harness, API provider, model, and effort for every route, shows how each one will start, and asks before saving the choices. The current default group uses Fable, GPT-5.6 Sol, Grok 4.6, and Opus. Named Codex and Pi providers may select models already configured in their trusted user-level settings; descriptors never contain endpoints or credentials.
 
-An older model sheet starts using the rolling aliases in memory as soon as this release is installed. Run setup once after updating to persist that migration. It replaces versioned Fable and Opus entries while preserving every role assignment and effort selection.
+An older model sheet is normalized to schema 2 in memory as soon as this release is installed. Run setup once after updating to persist that migration. It adds the built-in API-provider identity, replaces versioned Fable and Opus entries, and preserves every valid custom route, role assignment, and effort selection.
 
 ### 2. Use poteto-mode
 
@@ -124,7 +124,7 @@ Plugin skills include `pstack:` in their name. In Claude Code, invoke a native s
 
 Some pstack workflows use one model. Skills such as `architect`, `arena`, and `interrogate` can run several models in parallel. Each model run uses the subscription and token allowance of its own command-line tool.
 
-`setup-pstack` lets you choose the models, one requested effort per model family, and how many run in parallel. A model from the app you are using runs inside that app. Other models run through their own command-line tools. Open Pstack does not quietly replace a failed model with a weaker one.
+`setup-pstack` lets you choose typed `<harness>[<api-provider>]:<model>@<effort>` targets and how many run in parallel. A built-in model from the app you are using runs inside that app. Named Codex providers and every Pi route run externally so the provider choice can be pinned exactly. Claude relay settings, Codex provider definitions, and Grok endpoint/authentication stay in their harness-owned configuration. Open Pstack does not quietly replace a failed model with a weaker one.
 
 ## Claude Code and Codex
 
@@ -134,7 +134,7 @@ Both apps read the same pstack skills. Only the way they start those skills and 
 | --- | --- | --- |
 | Start poteto-mode | Claude loads a small startup instruction that can route non-trivial work into it. You can also run `/pstack:poteto-mode` yourself. | Ask for `pstack:poteto-mode` by name. Codex does not load the Claude startup instruction. |
 | Runs inside the app | Claude models stay inside Claude Code. | The Sol model stays inside Codex. |
-| Other models | Codex and Grok run through their signed-in command-line tools. | Claude and Grok run through their signed-in command-line tools. |
+| Other models | Codex, Grok, and Pi run through their configured command-line tools. | Claude, Grok, Pi, and named Codex providers run through their configured command-line tools. |
 | Skills and workflows | Shared with Codex. | Shared with Claude Code. |
 
 Grok can take part in a multi-model review. You cannot use Grok as the main app running pstack.
@@ -153,7 +153,7 @@ This repository also keeps:
 
 ## Staying close to Lauren's pstack
 
-Open Pstack 1.3.0 tracks pstack 0.14.7 at Cursor commit [`efa2a531985e0a8084d36ff3cf87233be8a9f34b`](https://github.com/cursor/plugins/commit/efa2a531985e0a8084d36ff3cf87233be8a9f34b).
+Open Pstack 1.4.0-oldwinter.1 tracks pstack 0.14.7 at Cursor commit [`efa2a531985e0a8084d36ff3cf87233be8a9f34b`](https://github.com/cursor/plugins/commit/efa2a531985e0a8084d36ff3cf87233be8a9f34b).
 
 The two projects have separate version numbers. The pstack version identifies Lauren's upstream content. The Open Pstack version identifies the Claude Code and Codex package built from it.
 
@@ -161,7 +161,7 @@ In this repository, “upstream” means Lauren's original pstack. Open Pstack d
 
 ## Contributing
 
-Fixes for Claude Code or Codex and help bringing over new pstack releases are welcome. Search [GitHub Issues](https://github.com/ericlitman/open-pstack/issues) before opening a new issue. For larger behavior changes, explain why the change belongs in Open Pstack instead of Lauren's original project.
+Fixes for Claude Code or Codex and help bringing over new pstack releases are welcome. Search [GitHub Issues](https://github.com/oldwinter/open-pstack/issues) before opening a new issue. For larger behavior changes, explain why the change belongs in Open Pstack instead of Lauren's original project.
 
 Read [UPSTREAM.md](UPSTREAM.md) before changing content brought over from Lauren's pstack. Pull requests must keep one shared skill tree for Claude Code and Codex and pass the repository's tests, type checks, plugin validation, and static checks.
 

@@ -1,13 +1,16 @@
 import { describe, expect, it } from "bun:test";
-import { invocationCommand } from "./commands.ts";
-import type { RunnerOptions } from "./types.ts";
+import { invocationCommand, preflightCommand } from "./commands.ts";
+import type { LaneTarget, RunnerOptions } from "./types.ts";
 
 function options(overrides: Partial<RunnerOptions> = {}): RunnerOptions {
   return {
-    parent: "claude",
-    provider: "codex",
-    model: "gpt-5.6-sol",
-    effort: "max",
+    parentHarness: "claude",
+    target: {
+      harness: "codex",
+      apiProvider: "openai",
+      model: "gpt-5.6-sol",
+      effort: "max",
+    },
     mode: "read-only",
     promptPath: "/tmp/prompt.md",
     cwd: "/tmp/worktree",
@@ -49,6 +52,8 @@ describe("invocationCommand", () => {
       "--model",
       "gpt-5.6-sol",
       "--config",
+      'model_provider="openai"',
+      "--config",
       'model_reasoning_effort="max"',
       "--sandbox",
       "read-only",
@@ -73,9 +78,13 @@ describe("invocationCommand", () => {
   it("passes Claude model, effort, permissions, and no-recursion controls", () => {
     const spec = invocationCommand(
       options({
-        parent: "codex",
-        provider: "claude",
-        model: "fable",
+        parentHarness: "codex",
+        target: {
+          harness: "claude",
+          apiProvider: "anthropic",
+          model: "fable",
+          effort: "max",
+        },
       })
     );
     expect(spec.command).toBe("claude");
@@ -105,7 +114,14 @@ describe("invocationCommand", () => {
 
   it("limits Grok to the assigned cwd and disables recursive agents", () => {
     const spec = invocationCommand(
-      options({ provider: "grok", model: "grok-4.6", effort: "xhigh" })
+      options({
+        target: {
+          harness: "grok",
+          apiProvider: "xai",
+          model: "grok-4.6",
+          effort: "xhigh",
+        },
+      })
     );
     expect(spec.command).toBe("grok");
     expect(spec.stdin).toBe("none");
@@ -140,7 +156,15 @@ describe("invocationCommand", () => {
       expect.arrayContaining(["--sandbox", "workspace-write"])
     );
     const grok = invocationCommand(
-      options({ provider: "grok", model: "grok-4.6", mode: "isolated-write" })
+      options({
+        target: {
+          harness: "grok",
+          apiProvider: "xai",
+          model: "grok-4.6",
+          effort: "xhigh",
+        },
+        mode: "isolated-write",
+      })
     );
     expect(grok.args).toEqual(
       expect.arrayContaining([
@@ -155,7 +179,16 @@ describe("invocationCommand", () => {
     expect(grok.args).not.toContain("--always-approve");
 
     const claude = invocationCommand(
-      options({ provider: "claude", model: "fable", mode: "isolated-write" })
+      options({
+        parentHarness: "codex",
+        target: {
+          harness: "claude",
+          apiProvider: "anthropic",
+          model: "fable",
+          effort: "max",
+        },
+        mode: "isolated-write",
+      })
     );
     expect(claude.args).toEqual(
       expect.arrayContaining([
@@ -168,34 +201,97 @@ describe("invocationCommand", () => {
   });
 
   it("covers low, medium, and high for every external provider", () => {
-    const cases = [
+    const cases: Array<{
+      readonly target: LaneTarget;
+      readonly flag: (effort: "low" | "medium" | "high") => string[];
+    }> = [
       {
-        provider: "claude" as const,
-        model: "fable",
+        target: {
+          harness: "claude",
+          apiProvider: "anthropic",
+          model: "fable",
+          effort: "max",
+        },
         flag: (effort: "low" | "medium" | "high") => ["--effort", effort],
       },
       {
-        provider: "codex" as const,
-        model: "gpt-5.6-sol",
+        target: {
+          harness: "codex",
+          apiProvider: "openai",
+          model: "gpt-5.6-sol",
+          effort: "max",
+        },
         flag: (effort: "low" | "medium" | "high") => [
           "--config",
           `model_reasoning_effort="${effort}"`,
         ],
       },
       {
-        provider: "grok" as const,
-        model: "grok-4.6",
+        target: {
+          harness: "grok",
+          apiProvider: "xai",
+          model: "grok-4.6",
+          effort: "xhigh",
+        },
         flag: (effort: "low" | "medium" | "high") => [
           "--reasoning-effort",
           effort,
         ],
       },
     ];
-    for (const { provider, model, flag } of cases) {
+    for (const { target, flag } of cases) {
       for (const effort of ["low", "medium", "high"] as const) {
-        const spec = invocationCommand(options({ provider, model, effort }));
+        const spec = invocationCommand(options({ target: { ...target, effort } }));
         expect(spec.args).toEqual(expect.arrayContaining(flag(effort)));
       }
     }
+  });
+
+  it("uses structured Pi auth preflight and a read-only JSON invocation", () => {
+    const target: LaneTarget = {
+      harness: "pi",
+      apiProvider: "gateway",
+      model: "gpt-5.6-luna",
+      effort: "max",
+    };
+    expect(preflightCommand(target)).toEqual({
+      command: "pi",
+      args: [
+        "auth",
+        "check",
+        "--provider",
+        "gateway",
+        "--model",
+        "gpt-5.6-luna",
+        "--json",
+        "--no-refresh",
+      ],
+      stdin: "none",
+    });
+    const spec = invocationCommand(options({ target }));
+    expect(spec).toEqual({
+      command: "pi",
+      args: [
+        "--print",
+        "--mode",
+        "json",
+        "--provider",
+        "gateway",
+        "--model",
+        "gpt-5.6-luna",
+        "--thinking",
+        "max",
+        "--no-session",
+        "--no-extensions",
+        "--no-skills",
+        "--no-prompt-templates",
+        "--no-themes",
+        "--approve",
+        "--offline",
+        "--tools",
+        "read,grep,find,ls",
+      ],
+      stdin: "prompt",
+    });
   });
 });

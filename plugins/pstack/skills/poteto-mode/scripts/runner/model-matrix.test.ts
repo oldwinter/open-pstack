@@ -14,7 +14,8 @@ const AGENTS_DIR = join(PLUGIN_ROOT, "agents");
 const MATRIX_HEADER = [
   "Family",
   "Upstream pstack choice",
-  "Provider",
+  "Harness",
+  "API provider",
   "Model",
   "Default effort",
   "Selectable efforts",
@@ -22,9 +23,9 @@ const MATRIX_HEADER = [
 ] as const;
 
 const FAMILY_ORDER = ["fable", "sol", "grok", "opus"] as const;
-const PROVIDERS = ["claude", "codex", "grok"] as const;
+const HARNESSES = ["claude", "codex", "grok", "pi"] as const;
 const DESCRIPTOR_RE =
-  /(claude|codex|grok):[a-z0-9.-]+@(low|medium|high|xhigh|max)/g;
+  /(claude|codex|grok|pi)\[[a-zA-Z0-9][a-zA-Z0-9._-]*\]:[^\s,]+@(low|medium|high|xhigh|max)/g;
 const PANEL_ROLES = [
   "how critics",
   "arena runners",
@@ -51,18 +52,19 @@ const SHEET_ROLES = [
   "interrogate reviewers",
 ] as const;
 const SETUP_SECTION_ORDER = [
-  "### 2. Load current state",
-  "### 3. Parse per-family efforts",
-  "### 4. Collect one requested effort per family",
-  "### 5. Probe the four requested pairs",
-  "### 6. Render, preserving role families",
-  "### 7. Confirm and commit",
+  "### 2. Load and normalize current state",
+  "### 3. Collect intended route changes",
+  "### 4. Validate the intended map",
+  "### 5. Probe every distinct target",
+  "### 6. Confirm the final map",
+  "### 7. Write both targets atomically",
 ] as const;
 
 interface MatrixRow {
   family: string;
   upstreamChoice: string;
-  provider: string;
+  harness: string;
+  apiProvider: string;
   model: string;
   defaultEffort: Effort;
   selectableEfforts: Effort[];
@@ -128,22 +130,26 @@ function parseModelMatrix(markdown: string): MatrixRow[] {
     const [
       family,
       upstreamChoice,
-      provider,
+      harness,
+      apiProvider,
       model,
       defaultEffortRaw,
       selectableRaw,
       stemRaw,
     ] = cells;
-    if (!(PROVIDERS as readonly string[]).includes(provider)) {
-      throw new Error(`invalid provider: ${provider}`);
+    if (!(HARNESSES as readonly string[]).includes(harness)) {
+      throw new Error(`invalid harness: ${harness}`);
+    }
+    if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(apiProvider)) {
+      throw new Error(`invalid API provider: ${apiProvider}`);
     }
     const selectableEfforts = selectableRaw.split(/\s+/).map(asEffort);
     const claudeNativeAgentStem = stemRaw === "-" ? null : stemRaw;
     if (claudeNativeAgentStem !== null && !/^[a-z0-9-]+$/.test(claudeNativeAgentStem)) {
       throw new Error(`invalid Claude-native agent stem: ${stemRaw}`);
     }
-    if ((provider === "claude") !== (claudeNativeAgentStem !== null)) {
-      throw new Error(`${family} stem must be present iff provider is claude`);
+    if ((harness === "claude") !== (claudeNativeAgentStem !== null)) {
+      throw new Error(`${family} stem must be present iff harness is claude`);
     }
     const defaultEffort = asEffort(defaultEffortRaw);
     if (!selectableEfforts.includes(defaultEffort)) {
@@ -152,7 +158,8 @@ function parseModelMatrix(markdown: string): MatrixRow[] {
     return {
       family,
       upstreamChoice,
-      provider,
+      harness,
+      apiProvider,
       model,
       defaultEffort,
       selectableEfforts,
@@ -163,7 +170,7 @@ function parseModelMatrix(markdown: string): MatrixRow[] {
 
 function defaultDescriptors(rows: MatrixRow[]): string[] {
   return rows.map(
-    (row) => `${row.provider}:${row.model}@${row.defaultEffort}`
+    (row) => `${row.harness}[${row.apiProvider}]:${row.model}@${row.defaultEffort}`
   );
 }
 
@@ -248,7 +255,7 @@ describe("model matrix", () => {
         const { fields, body } = parseFrontmatter(text);
         expect(fields).toEqual({
           name,
-          description: `Native Claude lane for pstack roles configured as ${row.provider}:${row.model}@${effort}.`,
+          description: `Native Claude lane for pstack roles configured as ${row.harness}[${row.apiProvider}]:${row.model}@${effort}.`,
           model: row.model,
           effort,
           background: "true",
@@ -281,11 +288,11 @@ describe("model matrix", () => {
     const sheet = firstRunSheet(setup);
     const roles = sheet
       .split("\n")
-      .filter((line) => line.includes(": "))
+      .filter((line) => SHEET_ROLES.some((role) => line.startsWith(`${role}: `)))
       .map((line) => line.slice(0, line.indexOf(": ")));
     expect(roles).toEqual([...SHEET_ROLES]);
     const byFamily = new Map<string, MatrixRow>(
-      rows.map((row) => [`${row.provider}:${row.model}`, row])
+      rows.map((row) => [`${row.harness}[${row.apiProvider}]:${row.model}`, row])
     );
     for (const descriptor of sheet.match(DESCRIPTOR_RE) ?? []) {
       const at = descriptor.lastIndexOf("@");
@@ -316,16 +323,17 @@ describe("model matrix", () => {
       expect(current).toBeGreaterThan(previous);
       previous = current;
     }
-    expect(setup).toContain("Do not invent a precedence rule.");
+    expect(setup).toContain("Do not invent a precedence or fallback rule.");
     expect(setup).toContain("Do not probe or write while any inconsistency is unresolved.");
     expect(setup).toContain("A failed probe writes nothing:");
-    expect(setup).toContain("Run one probe per family");
-    expect(setup).toContain("normalized complete role map from step 2");
+    expect(setup).toContain("run one tiny read-only marker probe per distinct target");
+    expect(setup).toContain("Show the normalized complete role map.");
     expect(setup).toContain("starts with `claude-fable-` or `claude-opus-`");
-    expect(setup).toContain("preserving the provider, effort, role, and lane order");
-    expect(setup).toContain("Show any rolling-alias migrations");
+    expect(setup).toContain("preserving harness, API provider, effort, role, and lane order");
+    expect(setup).toContain("Show every schema 1 and rolling-alias migration");
     expect(setup).toContain("Every documented role remains present.");
-    expect(setup).toContain("An effort-only rerun cannot change a role's family.");
+    expect(setup).toContain("Preserve every valid schema 2 custom route.");
+    expect(setup).toContain("Parse effort from the last `@`");
     expect(setup).toContain("<!-- pstack:models:begin -->");
     expect(setup).toContain("<!-- pstack:models:end -->");
   });
@@ -338,7 +346,7 @@ describe("model matrix", () => {
     expect(externalStart).toBeGreaterThan(nativeStart);
     const nativeLanes = dispatch.slice(nativeStart, externalStart);
     expect(nativeLanes).toContain(
-      "match the descriptor's `(provider, model)` to one model-matrix row"
+      "match the descriptor's `(harness, API provider, model)` to one model-matrix row"
     );
     expect(nativeLanes).toContain("`pstack-<stem>-<effort>`");
   });

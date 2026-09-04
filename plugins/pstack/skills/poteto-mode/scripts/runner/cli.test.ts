@@ -4,10 +4,12 @@ import { parseArgs } from "./cli.ts";
 
 function argv(extra: readonly string[] = []): string[] {
   return [
-    "--parent",
+    "--parent-harness",
     "claude",
-    "--provider",
+    "--harness",
     "codex",
+    "--api-provider",
+    "openai",
     "--model",
     "gpt-5.6-sol",
     "--effort",
@@ -39,5 +41,36 @@ describe("runner CLI parsing", () => {
     expect(() => parseArgs(argv(["--timeout", "0"]))).toThrow(
       "greater than zero"
     );
+  });
+
+  it("parses a provider-qualified target", () => {
+    expect(parseArgs(argv())?.target).toEqual({
+      harness: "codex",
+      apiProvider: "openai",
+      model: "gpt-5.6-sol",
+      effort: "max",
+    });
+  });
+
+  it("preserves a named Codex provider under a Codex parent", () => {
+    const values = argv();
+    values[1] = "codex";
+    values[5] = "gateway";
+
+    expect(parseArgs(values)).toMatchObject({
+      parentHarness: "codex",
+      target: {
+        harness: "codex",
+        apiProvider: "gateway",
+        model: "gpt-5.6-sol",
+      },
+    });
+  });
+
+  it("rejects arbitrary endpoint and executable flags", () => {
+    expect(() => parseArgs(argv(["--endpoint", "https://example.invalid"])))
+      .toThrow("Unknown option");
+    expect(() => parseArgs(argv(["--executable", "/tmp/custom-runner"])))
+      .toThrow("Unknown option");
   });
 });
