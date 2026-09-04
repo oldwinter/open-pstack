@@ -5,8 +5,8 @@ import {
   CLAUDE_RELAY_ENV_KEYS,
   type ClaudeRelayEnvKey,
   type ConfigurationProvenance,
-  type ExecutionHarness,
   type LaneTarget,
+  type ParentHarness,
 } from "./types.ts";
 
 const CODEX_IDENTITY = [
@@ -47,15 +47,11 @@ function jsonObject(value: unknown): JsonObject | null {
 }
 
 export function childEnvironment(
-  harness: ExecutionHarness,
+  parentHarness: ParentHarness,
   source: NodeJS.ProcessEnv = process.env
 ): NodeJS.ProcessEnv {
   const result = { ...source };
-  const remove = harness === "claude"
-    ? CODEX_IDENTITY
-    : harness === "codex"
-      ? CLAUDE_IDENTITY
-      : [...CODEX_IDENTITY, ...CLAUDE_IDENTITY];
+  const remove = parentHarness === "claude" ? CLAUDE_IDENTITY : CODEX_IDENTITY;
   for (const key of remove) delete result[key];
   return result;
 }
@@ -101,10 +97,11 @@ function claudeSettingsPath(source: NodeJS.ProcessEnv): string {
 }
 
 export function resolveProviderEnvironment(
+  parentHarness: ParentHarness,
   target: LaneTarget,
   source: NodeJS.ProcessEnv = process.env
 ): ProviderEnvironmentResolution {
-  const base = childEnvironment(target.harness, source);
+  const base = childEnvironment(parentHarness, source);
   if (target.harness !== "claude") {
     return {
       kind: "ready",

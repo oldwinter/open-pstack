@@ -687,7 +687,10 @@ async function executeLane(
 ): Promise<RunResult> {
   const startedAt = new Date(started).toISOString();
   const prompt = readFileSync(options.promptPath, "utf8");
-  const environment = resolveProviderEnvironment(options.target);
+  const environment = resolveProviderEnvironment(
+    options.parentHarness,
+    options.target
+  );
   progress.configuration = environment.configuration;
   if (environment.kind === "invalid") throw new Error(environment.message);
   const env = environment.env;

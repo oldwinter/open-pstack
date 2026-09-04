@@ -24,6 +24,7 @@ let previousHome: string | undefined;
 let previousAnthropicBaseUrl: string | undefined;
 let previousAnthropicAuthToken: string | undefined;
 let previousAnthropicApiKey: string | undefined;
+let previousCodexThreadId: string | undefined;
 
 const fake = `#!/usr/bin/env bun
 import { appendFileSync, existsSync, unlinkSync, writeFileSync } from "node:fs";
@@ -35,6 +36,10 @@ const isPreflight =
   (name === "grok" && args[0] === "models") ||
   (name === "pi" && args[0] === "auth");
 const stage = isPreflight ? "preflight" : "model";
+if (process.env.FAKE_REJECT_CODEX_IDENTITY === "1" && process.env.CODEX_THREAD_ID) {
+  console.error("nested Codex identity reached external child");
+  process.exit(1);
+}
 const claudeProjectionMatches = process.env.FAKE_REQUIRE_CLAUDE_PROJECTION !== "1" || (
   process.env.ANTHROPIC_BASE_URL === "settings-base" &&
   process.env.ANTHROPIC_AUTH_TOKEN === "settings-token" &&
@@ -292,6 +297,7 @@ beforeEach(() => {
   previousAnthropicBaseUrl = process.env.ANTHROPIC_BASE_URL;
   previousAnthropicAuthToken = process.env.ANTHROPIC_AUTH_TOKEN;
   previousAnthropicApiKey = process.env.ANTHROPIC_API_KEY;
+  previousCodexThreadId = process.env.CODEX_THREAD_ID;
   process.env.PATH = `${bin}:${dirname(process.execPath)}:${previousPath ?? ""}`;
   delete process.env.FAKE_TIMEOUT;
   delete process.env.FAKE_INVALID_MODEL;
@@ -317,6 +323,7 @@ beforeEach(() => {
   delete process.env.FAKE_REQUIRE_CLAUDE_PROJECTION;
   delete process.env.FAKE_GROK_OWN_KEY;
   delete process.env.FAKE_GROK_AUTH_KIND;
+  delete process.env.FAKE_REJECT_CODEX_IDENTITY;
 });
 
 afterEach(() => {
@@ -330,6 +337,8 @@ afterEach(() => {
   else process.env.ANTHROPIC_AUTH_TOKEN = previousAnthropicAuthToken;
   if (previousAnthropicApiKey === undefined) delete process.env.ANTHROPIC_API_KEY;
   else process.env.ANTHROPIC_API_KEY = previousAnthropicApiKey;
+  if (previousCodexThreadId === undefined) delete process.env.CODEX_THREAD_ID;
+  else process.env.CODEX_THREAD_ID = previousCodexThreadId;
   delete process.env.FAKE_TIMEOUT;
   delete process.env.FAKE_INVALID_MODEL;
   delete process.env.FAKE_LEAKY_FAILURE;
@@ -354,6 +363,7 @@ afterEach(() => {
   delete process.env.FAKE_REQUIRE_CLAUDE_PROJECTION;
   delete process.env.FAKE_GROK_OWN_KEY;
   delete process.env.FAKE_GROK_AUTH_KIND;
+  delete process.env.FAKE_REJECT_CODEX_IDENTITY;
   rmSync(scratch, { recursive: true, force: true });
 });
 
@@ -529,6 +539,8 @@ describe("runLane", () => {
   });
 
   it("runs a named Codex provider externally from a Codex parent", async () => {
+    process.env.CODEX_THREAD_ID = "parent-thread";
+    process.env.FAKE_REJECT_CODEX_IDENTITY = "1";
     const base = options("codex", "codex-named-provider");
     const input: RunnerOptions = {
       ...base,
@@ -1186,6 +1198,7 @@ describe("runLane", () => {
 describe("childEnvironment", () => {
   it("freezes each resolved provider environment snapshot", () => {
     const resolved = resolveProviderEnvironment(
+      "codex",
       {
         harness: "codex",
         apiProvider: "gateway",
@@ -1199,7 +1212,7 @@ describe("childEnvironment", () => {
     if (resolved.kind === "ready") expect(Object.isFrozen(resolved.env)).toBe(true);
   });
 
-  it("removes only inherited runtime identity needed to avoid nested detection", () => {
+  it("removes the parent runtime identity needed to avoid nested detection", () => {
     const source = {
       PATH: "/bin",
       CODEX_THREAD_ID: "codex",
@@ -1210,18 +1223,14 @@ describe("childEnvironment", () => {
     };
     expect(childEnvironment("claude", source)).toEqual({
       PATH: "/bin",
-      CLAUDECODE: "1",
-      CLAUDE_CODE_CHILD_SESSION: "1",
-      KEEP_ME: "yes",
-    });
-    expect(childEnvironment("codex", source)).toEqual({
-      PATH: "/bin",
       CODEX_THREAD_ID: "codex",
       CODEX_CI: "1",
       KEEP_ME: "yes",
     });
-    expect(childEnvironment("grok", source)).toEqual({
+    expect(childEnvironment("codex", source)).toEqual({
       PATH: "/bin",
+      CLAUDECODE: "1",
+      CLAUDE_CODE_CHILD_SESSION: "1",
       KEEP_ME: "yes",
     });
   });
