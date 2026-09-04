@@ -2,6 +2,40 @@ import { describe, expect, it } from "bun:test";
 import { parseProviderOutput, reportedModelMatches } from "./parse-output.ts";
 
 describe("parseProviderOutput", () => {
+  it("accepts only a settled Pi response from the requested provider and model", () => {
+    const parsed = parseProviderOutput(
+      {
+        harness: "pi",
+        apiProvider: "gateway",
+        model: "gpt-5.6-luna",
+        effort: "max",
+      },
+      [
+        JSON.stringify({ type: "session", id: "pi-session" }),
+        JSON.stringify({
+          type: "message_end",
+          message: {
+            role: "assistant",
+            content: [{ type: "text", text: "PI_OK" }],
+            provider: "gateway",
+            model: "gpt-5.6-luna",
+            stopReason: "stop",
+            usage: { input: 12, output: 3, cacheRead: 2, totalTokens: 17 },
+          },
+        }),
+        JSON.stringify({ type: "agent_end", messages: [], willRetry: false }),
+        JSON.stringify({ type: "agent_settled" }),
+      ].join("\n"),
+      ""
+    );
+    expect(parsed).toMatchObject({
+      text: "PI_OK",
+      reportedProvider: "gateway",
+      reportedModel: "gpt-5.6-luna",
+      sessionId: "pi-session",
+    });
+  });
+
   it("extracts Claude text, model, usage, cost, and session", () => {
     const parsed = parseProviderOutput(
       "claude",

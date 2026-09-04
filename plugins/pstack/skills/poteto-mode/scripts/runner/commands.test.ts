@@ -19,6 +19,27 @@ function options(overrides: Partial<RunnerOptions> = {}): RunnerOptions {
 }
 
 describe("invocationCommand", () => {
+  it("pins a named Codex API provider in argv", () => {
+    const spec = invocationCommand({
+      parentHarness: "claude",
+      target: {
+        harness: "codex",
+        apiProvider: "gateway",
+        model: "gpt-5.6-sol",
+        effort: "max",
+      },
+      mode: "read-only",
+      promptPath: "/tmp/prompt.md",
+      cwd: "/tmp/worktree",
+      outputPath: "/tmp/output.md",
+      receiptPath: "/tmp/receipt.json",
+      timeoutMs: null,
+    });
+    expect(spec.args).toEqual(
+      expect.arrayContaining(["--config", 'model_provider="gateway"'])
+    );
+  });
+
   it("pins Codex model, effort, sandbox, cwd, and JSONL output", () => {
     const spec = invocationCommand(options());
     expect(spec.command).toBe("codex");

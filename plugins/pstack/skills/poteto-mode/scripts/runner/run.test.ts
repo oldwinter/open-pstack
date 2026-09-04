@@ -19,6 +19,10 @@ import type { Provider, RunnerOptions, RunnerReceipt } from "./types.ts";
 let scratch = "";
 let bin = "";
 let previousPath: string | undefined;
+let previousHome: string | undefined;
+let previousAnthropicBaseUrl: string | undefined;
+let previousAnthropicAuthToken: string | undefined;
+let previousAnthropicApiKey: string | undefined;
 
 const fake = `#!/usr/bin/env bun
 import { appendFileSync, existsSync, unlinkSync, writeFileSync } from "node:fs";
@@ -58,7 +62,12 @@ if (name === "claude" && args[0] === "auth") {
   if (process.env.FAKE_REMOVE_EXECUTABLE_AFTER_PREFLIGHT === "1") {
     unlinkSync(process.argv[1]);
   }
-  console.log(JSON.stringify({loggedIn:true}));
+  const projectionMatches = process.env.FAKE_REQUIRE_CLAUDE_PROJECTION !== "1" || (
+    process.env.ANTHROPIC_BASE_URL === "settings-base" &&
+    process.env.ANTHROPIC_AUTH_TOKEN === "settings-token" &&
+    process.env.ANTHROPIC_API_KEY === undefined
+  );
+  console.log(JSON.stringify({loggedIn:projectionMatches}));
   process.exit(0);
 }
 if (name === "codex" && args[0] === "login") {
@@ -84,7 +93,10 @@ if (name === "grok" && args[0] === "models") {
     console.error("Not logged in. Run grok auth login.");
     process.exit(1);
   }
-  console.log("You are logged in with grok.com.\\nAvailable models:\\n  * grok-4.6 (default)");
+  const authBanner = process.env.FAKE_GROK_OWN_KEY === "1"
+    ? "Model 'grok-4.6' is using its own API key."
+    : "You are logged in with grok.com.";
+  console.log(authBanner + "\\nAvailable models:\\n  * grok-4.6 (default)");
   process.exit(0);
 }
 const modelIndex = args.findIndex((value) => value === "--model");
@@ -223,6 +235,10 @@ beforeEach(() => {
   writeFileSync(join(scratch, "prompt.md"), "Return the marker.");
   for (const name of ["claude", "codex", "grok"]) makeExecutable(name);
   previousPath = process.env.PATH;
+  previousHome = process.env.HOME;
+  previousAnthropicBaseUrl = process.env.ANTHROPIC_BASE_URL;
+  previousAnthropicAuthToken = process.env.ANTHROPIC_AUTH_TOKEN;
+  previousAnthropicApiKey = process.env.ANTHROPIC_API_KEY;
   process.env.PATH = `${bin}:${dirname(process.execPath)}:${previousPath ?? ""}`;
   delete process.env.FAKE_TIMEOUT;
   delete process.env.FAKE_INVALID_MODEL;
@@ -244,10 +260,19 @@ beforeEach(() => {
   delete process.env.FAKE_DESCENDANT_HOLDS_PIPES_MS;
   delete process.env.FAKE_DESCENDANT_PID_PATH;
   delete process.env.FAKE_SELF_SIGNAL;
+  delete process.env.FAKE_REQUIRE_CLAUDE_PROJECTION;
+  delete process.env.FAKE_GROK_OWN_KEY;
 });
 
 afterEach(() => {
   process.env.PATH = previousPath;
+  process.env.HOME = previousHome;
+  if (previousAnthropicBaseUrl === undefined) delete process.env.ANTHROPIC_BASE_URL;
+  else process.env.ANTHROPIC_BASE_URL = previousAnthropicBaseUrl;
+  if (previousAnthropicAuthToken === undefined) delete process.env.ANTHROPIC_AUTH_TOKEN;
+  else process.env.ANTHROPIC_AUTH_TOKEN = previousAnthropicAuthToken;
+  if (previousAnthropicApiKey === undefined) delete process.env.ANTHROPIC_API_KEY;
+  else process.env.ANTHROPIC_API_KEY = previousAnthropicApiKey;
   delete process.env.FAKE_TIMEOUT;
   delete process.env.FAKE_INVALID_MODEL;
   delete process.env.FAKE_CANCEL;
@@ -268,10 +293,60 @@ afterEach(() => {
   delete process.env.FAKE_DESCENDANT_HOLDS_PIPES_MS;
   delete process.env.FAKE_DESCENDANT_PID_PATH;
   delete process.env.FAKE_SELF_SIGNAL;
+  delete process.env.FAKE_REQUIRE_CLAUDE_PROJECTION;
+  delete process.env.FAKE_GROK_OWN_KEY;
   rmSync(scratch, { recursive: true, force: true });
 });
 
 describe("runLane", () => {
+  it("projects Claude relay env from user settings as one replacement", async () => {
+    const settingsDir = join(scratch, ".claude");
+    mkdirSync(settingsDir);
+    writeFileSync(
+      join(settingsDir, "settings.json"),
+      JSON.stringify({
+        env: {
+          ANTHROPIC_BASE_URL: "settings-base",
+          ANTHROPIC_AUTH_TOKEN: "settings-token",
+        },
+      })
+    );
+    process.env.HOME = scratch;
+    process.env.ANTHROPIC_BASE_URL = "ambient-base";
+    process.env.ANTHROPIC_AUTH_TOKEN = "ambient-token";
+    process.env.ANTHROPIC_API_KEY = "ambient-api-key";
+    process.env.FAKE_REQUIRE_CLAUDE_PROJECTION = "1";
+
+    const input = options("claude", "claude-settings-projection");
+    const result = await runLane(input);
+
+    expect(result.exitCode).toBe(0);
+    expect(receipt(input.receiptPath)).toMatchObject({
+      configuration: {
+        source: "claude-user-settings",
+        importedKeys: ["ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN"],
+        replacedKeys: [
+          "ANTHROPIC_BASE_URL",
+          "ANTHROPIC_AUTH_TOKEN",
+          "ANTHROPIC_API_KEY",
+        ],
+      },
+    });
+  });
+
+  it("accepts Grok's own-API-key authentication banner", async () => {
+    process.env.FAKE_GROK_OWN_KEY = "1";
+    const input = options("grok", "grok-own-key");
+
+    const result = await runLane(input);
+
+    expect(result.exitCode).toBe(0);
+    expect(receipt(input.receiptPath)).toMatchObject({
+      status: "complete",
+      preflight: { status: "passed" },
+    });
+  }, 10_000);
+
   for (const provider of ["claude", "codex", "grok"] as const) {
     it(`executes and receipts the ${provider} external lane`, async () => {
       const input = options(provider);
