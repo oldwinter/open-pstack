@@ -51,7 +51,7 @@ fi
 legacy_model_pins="$(
   grep -REn \
     --include='*.md' --include='*.ts' --include='*.sh' \
-    'claude:claude-(fable|opus)-[0-9]|^model: claude-(fable|opus)-[0-9]|--model claude-(fable|opus)-[0-9]' \
+    'claude(\[[a-zA-Z0-9._-]+\])?:claude-(fable|opus)-[0-9]|^model: claude-(fable|opus)-[0-9]|--model claude-(fable|opus)-[0-9]' \
     "$repo/plugins/pstack" "$repo/tests" "$repo/README.md" "$repo/docs/reference.md" \
     2>/dev/null || true
 )"
@@ -72,11 +72,9 @@ else
   note "ok: active Fable and Opus configuration uses rolling aliases"
 fi
 
-# Static invariant (CHANGES maintenance note): provider-dispatch owns the default
-# provider/model quad and the four panel skills plus setup-pstack copy it verbatim.
 setup="$repo/plugins/pstack/skills/setup-pstack/SKILL.md"
 dispatch="$repo/plugins/pstack/skills/poteto-mode/references/provider-dispatch.md"
-quad_of() { { grep -oE '(claude|codex|grok):[a-z0-9.-]+@(low|medium|high|xhigh|max)' || true; } | tr '\n' ' ' | sed 's/ $//'; }
+quad_of() { { grep -oE '(claude|codex|grok|pi)\[[a-zA-Z0-9][a-zA-Z0-9._-]*\]:[a-z0-9.-]+@(low|medium|high|xhigh|max)' || true; } | tr '\n' ' ' | sed 's/ $//'; }
 canon_quad="$(awk '
   $0 == "## Model matrix" { in_matrix = 1; next }
   in_matrix && /^## / { exit }
@@ -91,11 +89,12 @@ canon_quad="$(awk '
     }
     family = cells[1]
     if (family == "Family" || family ~ /^:?-+:?$/) next
-    provider = cells[3]
-    model = cells[4]
-    effort = cells[5]
+    harness = cells[3]
+    api_provider = cells[4]
+    model = cells[5]
+    effort = cells[6]
     if (out != "") out = out " "
-    out = out provider ":" model "@" effort
+    out = out harness "[" api_provider "]:" model "@" effort
   }
   END { print out }
 ' "$dispatch")"
@@ -351,8 +350,8 @@ fi
 
 sol_descriptor="$(awk -F '|' '
   $2 ~ /^[[:space:]]*sol[[:space:]]*$/ {
-    for (i = 4; i <= 6; i++) gsub(/^[[:space:]]+|[[:space:]]+$/, "", $i)
-    print $4 ":" $5 "@" $6
+    for (i = 4; i <= 7; i++) gsub(/^[[:space:]]+|[[:space:]]+$/, "", $i)
+    print $4 "[" $5 "]:" $6 "@" $7
   }
 ' "$dispatch")"
 solo_code_bad=""

@@ -1,10 +1,122 @@
 import { describe, expect, it } from "bun:test";
 import { parseProviderOutput, reportedModelMatches } from "./parse-output.ts";
+import type { LaneTarget } from "./types.ts";
+
+const claudeTarget: LaneTarget = {
+  harness: "claude",
+  apiProvider: "anthropic",
+  model: "fable",
+  effort: "max",
+};
+const codexTarget: LaneTarget = {
+  harness: "codex",
+  apiProvider: "openai",
+  model: "gpt-5.6-sol",
+  effort: "max",
+};
+const grokTarget: LaneTarget = {
+  harness: "grok",
+  apiProvider: "xai",
+  model: "grok-4.6",
+  effort: "xhigh",
+};
+const piTarget: LaneTarget = {
+  harness: "pi",
+  apiProvider: "gateway",
+  model: "gpt-5.6-luna",
+  effort: "max",
+};
 
 describe("parseProviderOutput", () => {
+  it("accepts only a settled Pi response from the requested provider and model", () => {
+    const parsed = parseProviderOutput(
+      piTarget,
+      [
+        JSON.stringify({ type: "session", id: "pi-session" }),
+        JSON.stringify({
+          type: "message_end",
+          message: {
+            role: "assistant",
+            content: [{ type: "text", text: "PI_OK" }],
+            provider: "gateway",
+            model: "gpt-5.6-luna",
+            stopReason: "stop",
+            usage: { input: 12, output: 3, cacheRead: 2, totalTokens: 17 },
+          },
+        }),
+        JSON.stringify({ type: "agent_end", messages: [], willRetry: false }),
+        JSON.stringify({ type: "agent_settled" }),
+      ].join("\n"),
+      ""
+    );
+    expect(parsed).toMatchObject({
+      text: "PI_OK",
+      reportedProvider: "gateway",
+      reportedModel: "gpt-5.6-luna",
+      sessionId: "pi-session",
+    });
+  });
+
+  it("rejects Pi retries, aborts, route mismatches, and missing settlement", () => {
+    const session = JSON.stringify({ type: "session", id: "pi-session" });
+    const message = (overrides: Record<string, unknown> = {}): string => JSON.stringify({
+      type: "message_end",
+      message: {
+        role: "assistant",
+        content: [{ type: "text", text: "PI_OK" }],
+        provider: "gateway",
+        model: "gpt-5.6-luna",
+        stopReason: "stop",
+        usage: {},
+        ...overrides,
+      },
+    });
+    const settled = JSON.stringify({ type: "agent_settled" });
+
+    expect(() => parseProviderOutput(
+      piTarget,
+      [
+        session,
+        message(),
+        JSON.stringify({ type: "agent_end", messages: [], willRetry: true }),
+        settled,
+      ].join("\n"),
+      ""
+    )).toThrow("retry pending");
+    expect(() => parseProviderOutput(
+      piTarget,
+      [
+        session,
+        message({ stopReason: "aborted" }),
+        JSON.stringify({ type: "agent_end", messages: [], willRetry: false }),
+        settled,
+      ].join("\n"),
+      ""
+    )).toThrow("aborted");
+    expect(() => parseProviderOutput(
+      piTarget,
+      [
+        session,
+        message({ provider: "other" }),
+        JSON.stringify({ type: "agent_end", messages: [], willRetry: false }),
+        settled,
+      ].join("\n"),
+      ""
+    )).toThrow("requested provider");
+    expect(() => parseProviderOutput(
+      piTarget,
+      [
+        session,
+        message(),
+        JSON.stringify({ type: "agent_end", messages: [], willRetry: false }),
+      ].join("\n"),
+      ""
+    )).toThrow("settled terminal sequence");
+  });
+
   it("extracts Claude text, model, usage, cost, and session", () => {
     const parsed = parseProviderOutput(
-      "claude",
+      claudeTarget,
       JSON.stringify({
         result: "CLAUDE_OK",
         session_id: "claude-session",
@@ -12,8 +124,7 @@ describe("parseProviderOutput", () => {
         total_cost_usd: 0.05,
         modelUsage: { "claude-fable-9-9": { inputTokens: 10 } },
       }),
-      "",
-      "fable"
+      ""
     );
     expect(parsed).toMatchObject({
       text: "CLAUDE_OK",
@@ -26,7 +137,7 @@ describe("parseProviderOutput", () => {
 
   it("extracts Codex JSONL without inventing a provider-reported model", () => {
     const parsed = parseProviderOutput(
-      "codex",
+      codexTarget,
       [
         JSON.stringify({ type: "thread.started", thread_id: "codex-session" }),
         JSON.stringify({
@@ -43,8 +154,7 @@ describe("parseProviderOutput", () => {
           },
         }),
       ].join("\n"),
-      "model: gpt-5.6-sol\nreasoning effort: max\n",
-      "gpt-5.6-sol"
+      "model: gpt-5.6-sol\nreasoning effort: max\n"
     );
     expect(parsed).toMatchObject({
       text: "CODEX_OK",
@@ -61,7 +171,7 @@ describe("parseProviderOutput", () => {
 
   it("accepts Grok's reported build suffix", () => {
     const parsed = parseProviderOutput(
-      "grok",
+      grokTarget,
       [
         JSON.stringify({
           type: "assistant",
@@ -84,19 +194,18 @@ describe("parseProviderOutput", () => {
           modelUsage: { "grok-4.6-build": {} },
         }),
       ].join("\n"),
-      "",
-      "grok-4.6"
+      ""
     );
     expect(parsed.text).toBe("GROK_OK");
     expect(parsed.reportedModel).toBe("grok-4.6-build");
-    expect(reportedModelMatches("grok", "grok-4.6", parsed.reportedModel)).toBe(
+    expect(reportedModelMatches(grokTarget, parsed.reportedModel)).toBe(
       true
     );
   });
 
   it("selects the requested Claude model when usage includes a side model", () => {
     const parsed = parseProviderOutput(
-      "claude",
+      claudeTarget,
       JSON.stringify({
         result: "CLAUDE_OK",
         modelUsage: {
@@ -104,32 +213,37 @@ describe("parseProviderOutput", () => {
           "claude-fable-9-9": {},
         },
       }),
-      "",
-      "fable"
+      ""
     );
     expect(parsed.reportedModel).toBe("claude-fable-9-9");
   });
 
   it("matches only concrete Claude revisions from the requested rolling family", () => {
-    expect(reportedModelMatches("claude", "fable", "claude-fable-9-9")).toBe(true);
-    expect(reportedModelMatches("claude", "opus", "claude-opus-9")).toBe(true);
-    expect(reportedModelMatches("claude", "fable", "claude-opus-9")).toBe(false);
-    expect(reportedModelMatches("claude", "fable", "claude-fable-beta")).toBe(false);
-    expect(reportedModelMatches("claude", "fable", "fable")).toBe(false);
-    expect(reportedModelMatches("claude", "fable", "fable-preview")).toBe(false);
-    expect(reportedModelMatches("grok", "fable", "claude-fable-9-9")).toBe(false);
+    const opusTarget: LaneTarget = { ...claudeTarget, model: "opus" };
+    expect(reportedModelMatches(claudeTarget, "claude-fable-9-9")).toBe(true);
+    expect(reportedModelMatches(opusTarget, "claude-opus-9")).toBe(true);
+    expect(reportedModelMatches(claudeTarget, "claude-opus-9")).toBe(false);
+    expect(reportedModelMatches(claudeTarget, "claude-fable-beta")).toBe(false);
+    expect(reportedModelMatches(claudeTarget, "fable")).toBe(false);
+    expect(reportedModelMatches(claudeTarget, "fable-preview")).toBe(false);
+    expect(reportedModelMatches(grokTarget, "claude-fable-9-9")).toBe(false);
+    expect(
+      reportedModelMatches(claudeTarget, "gateway-fable", "gateway-fable")
+    ).toBe(true);
+    expect(
+      reportedModelMatches(claudeTarget, "claude-fable-9-9", "gateway-fable")
+    ).toBe(false);
   });
 
   it("rejects malformed or textless responses", () => {
     expect(() =>
-      parseProviderOutput("claude", "not-json", "", "fable")
+      parseProviderOutput(claudeTarget, "not-json", "")
     ).toThrow("valid JSON");
     expect(() =>
       parseProviderOutput(
-        "codex",
+        codexTarget,
         JSON.stringify({ type: "turn.completed" }),
-        "",
-        "gpt-5.6-sol"
+        ""
       )
     ).toThrow("final agent message");
   });

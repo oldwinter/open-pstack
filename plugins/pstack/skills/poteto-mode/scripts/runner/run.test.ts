@@ -13,12 +13,18 @@ import {
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { childEnvironment, runLane } from "./run.ts";
+import { resolveProviderEnvironment } from "./provider-environment.ts";
 import { main } from "./cli.ts";
-import type { Provider, RunnerOptions, RunnerReceipt } from "./types.ts";
+import type { ExecutionHarness, RunnerOptions, RunnerReceipt } from "./types.ts";
 
 let scratch = "";
 let bin = "";
 let previousPath: string | undefined;
+let previousHome: string | undefined;
+let previousAnthropicBaseUrl: string | undefined;
+let previousAnthropicAuthToken: string | undefined;
+let previousAnthropicApiKey: string | undefined;
+let previousCodexThreadId: string | undefined;
 
 const fake = `#!/usr/bin/env bun
 import { appendFileSync, existsSync, unlinkSync, writeFileSync } from "node:fs";
@@ -26,9 +32,23 @@ const args = process.argv.slice(2);
 const name = process.argv[1].split("/").at(-1);
 const isPreflight =
   (name === "claude" && args[0] === "auth") ||
-  (name === "codex" && args[0] === "login") ||
-  (name === "grok" && args[0] === "models");
+  (name === "codex" && (args[0] === "login" || args[0] === "--version")) ||
+  (name === "grok" && args[0] === "models") ||
+  (name === "pi" && args[0] === "auth");
 const stage = isPreflight ? "preflight" : "model";
+if (process.env.FAKE_REJECT_CODEX_IDENTITY === "1" && process.env.CODEX_THREAD_ID) {
+  console.error("nested Codex identity reached external child");
+  process.exit(1);
+}
+const claudeProjectionMatches = process.env.FAKE_REQUIRE_CLAUDE_PROJECTION !== "1" || (
+  process.env.ANTHROPIC_BASE_URL === "settings-base" &&
+  process.env.ANTHROPIC_AUTH_TOKEN === "settings-token" &&
+  process.env.ANTHROPIC_API_KEY === undefined &&
+  (
+    process.env.FAKE_REQUIRE_CLAUDE_MODEL_MAPPING !== "1" ||
+    process.env.ANTHROPIC_DEFAULT_FABLE_MODEL === "gateway-fable"
+  )
+);
 const startedPath = isPreflight
   ? process.env.FAKE_PREFLIGHT_STARTED_PATH
   : process.env.FAKE_MODEL_STARTED_PATH;
@@ -58,11 +78,23 @@ if (name === "claude" && args[0] === "auth") {
   if (process.env.FAKE_REMOVE_EXECUTABLE_AFTER_PREFLIGHT === "1") {
     unlinkSync(process.argv[1]);
   }
-  console.log(JSON.stringify({loggedIn:true}));
+  console.log(JSON.stringify({loggedIn:claudeProjectionMatches}));
   process.exit(0);
 }
 if (name === "codex" && args[0] === "login") {
   console.log("Logged in using ChatGPT");
+  process.exit(0);
+}
+if (name === "codex" && args[0] === "--version") {
+  console.log("codex-cli 9.9.9");
+  process.exit(0);
+}
+if (name === "pi" && args[0] === "auth") {
+  const providerIndex = args.findIndex((value) => value === "--provider");
+  console.log(JSON.stringify({
+    status: "ready",
+    provider: args[providerIndex + 1],
+  }));
   process.exit(0);
 }
 if (name === "grok" && args[0] === "models") {
@@ -72,30 +104,41 @@ if (name === "grok" && args[0] === "models") {
   const transientMarker = process.env.FAKE_GROK_TRANSIENT_UNAUTH_PATH;
   if (transientMarker && !existsSync(transientMarker)) {
     writeFileSync(transientMarker, String(process.pid));
-    console.log("Available models:\\n  * grok-4.6 (default)");
+    console.log("You are using XAI_API_KEY.\\nAvailable models:\\n  * grok-4.6 (default)");
     console.error("You are not authenticated.");
     process.exit(0);
   }
   if (process.env.FAKE_GROK_MISSING_MODEL === "1") {
-    console.log("You are logged in with grok.com.\\nAvailable models:\\n  * grok-4.5 (default)");
+    console.log("Model 'grok-4.6' is using its own API key.\\nAvailable models:\\n  * grok-4.5 (default)");
     process.exit(0);
   }
   if (process.env.FAKE_GROK_UNAUTH === "1") {
     console.error("Not logged in. Run grok auth login.");
     process.exit(1);
   }
-  console.log("You are logged in with grok.com.\\nAvailable models:\\n  * grok-4.6 (default)");
+  const authBanner = process.env.FAKE_GROK_AUTH_KIND === "xai-key"
+    ? "You are using XAI_API_KEY."
+    : process.env.FAKE_GROK_AUTH_KIND === "deployment-key"
+      ? "You are authenticated via deployment key."
+      : process.env.FAKE_GROK_OWN_KEY === "1"
+        ? "Model 'grok-4.6' is using its own API key."
+        : "You are logged in with grok.com.";
+  console.log(authBanner + "\\nAvailable models:\\n  * grok-4.6 (default)");
   process.exit(0);
 }
 const modelIndex = args.findIndex((value) => value === "--model");
 const model = modelIndex >= 0 ? args[modelIndex + 1] : "unknown";
 const reportedModel = model === "fable"
-  ? "claude-fable-9-9"
+  ? process.env.ANTHROPIC_DEFAULT_FABLE_MODEL ?? "claude-fable-9-9"
   : model === "opus"
     ? "claude-opus-9"
     : model;
 if (process.env.FAKE_INVALID_MODEL === "1") {
   console.error("The requested model is not supported with this account.");
+  process.exit(1);
+}
+if (stage === "model" && process.env.FAKE_LEAKY_FAILURE === "1") {
+  console.error('request failed endpoint=https://relay.example.invalid/v1 Authorization: Bearer bearer-secret token="token-secret" api_key=key-secret');
   process.exit(1);
 }
 if (stage === "model" && process.env.FAKE_DESCENDANT_HOLDS_PIPES_MS) {
@@ -114,15 +157,26 @@ if (stage === "model" && process.env.FAKE_SELF_SIGNAL) {
   process.kill(process.pid, process.env.FAKE_SELF_SIGNAL);
   await Bun.sleep(5_000);
 }
+if (name === "claude" && !claudeProjectionMatches) {
+  console.error("Claude projection changed between preflight and model execution");
+  process.exit(1);
+}
 if (name === "claude") {
   console.log(JSON.stringify({result:"CLAUDE_OK",session_id:"c1",usage:{input_tokens:10,output_tokens:2},total_cost_usd:0.01,modelUsage:{[reportedModel]:{}}}));
 } else if (name === "codex") {
   console.log(JSON.stringify({type:"thread.started",thread_id:"o1"}));
   console.log(JSON.stringify({type:"item.completed",item:{type:"agent_message",text:"CODEX_OK"}}));
   console.log(JSON.stringify({type:"turn.completed",usage:{input_tokens:20,cached_input_tokens:5,output_tokens:3,reasoning_output_tokens:1}}));
-} else {
+} else if (name === "grok") {
   console.log(JSON.stringify({type:"assistant",message:{content:[{type:"text",text:"progress"}]}}));
   console.log(JSON.stringify({type:"result",subtype:"success",is_error:false,result:"GROK_OK",session_id:"g1",usage:{input_tokens:30,output_tokens:4,total_tokens:34},total_cost_usd:0.02,modelUsage:{[model + "-build"]:{}}}));
+} else {
+  const providerIndex = args.findIndex((value) => value === "--provider");
+  const provider = args[providerIndex + 1];
+  console.log(JSON.stringify({type:"session",id:"p1"}));
+  console.log(JSON.stringify({type:"message_end",message:{role:"assistant",content:[{type:"text",text:"PI_OK"}],provider,model,stopReason:"stop",usage:{input:40,output:5,totalTokens:45}}}));
+  console.log(JSON.stringify({type:"agent_end",messages:[],willRetry:false}));
+  console.log(JSON.stringify({type:"agent_settled"}));
 }
 if (process.env.FAKE_MODEL_EXITING_PATH) {
   writeFileSync(process.env.FAKE_MODEL_EXITING_PATH, String(process.pid));
@@ -135,19 +189,38 @@ function makeExecutable(name: string): void {
   chmodSync(path, 0o755);
 }
 
-function options(provider: Provider, suffix: string = provider): RunnerOptions {
-  const parent = provider === "codex" ? "claude" : "codex";
-  const model =
-    provider === "claude"
-      ? "fable"
-      : provider === "codex"
-        ? "gpt-5.6-sol"
-        : "grok-4.6";
+function options(harness: ExecutionHarness, suffix: string = harness): RunnerOptions {
+  const parentHarness = harness === "codex" ? "claude" : "codex";
+  const target = harness === "claude"
+    ? {
+        harness,
+        apiProvider: "anthropic" as const,
+        model: "fable",
+        effort: "max" as const,
+      }
+    : harness === "codex"
+      ? {
+          harness,
+          apiProvider: "openai",
+          model: "gpt-5.6-sol",
+          effort: "max" as const,
+        }
+      : harness === "grok"
+        ? {
+            harness,
+            apiProvider: "xai" as const,
+            model: "grok-4.6",
+            effort: "xhigh" as const,
+          }
+        : {
+            harness,
+            apiProvider: "gateway",
+            model: "gpt-5.6-luna",
+            effort: "max" as const,
+          };
   return {
-    parent,
-    provider,
-    model,
-    effort: provider === "grok" ? "xhigh" : "max",
+    parentHarness,
+    target,
     mode: "read-only",
     promptPath: join(scratch, "prompt.md"),
     cwd: scratch,
@@ -164,10 +237,11 @@ function receipt(path: string): RunnerReceipt {
 function runnerArgs(input: RunnerOptions): string[] {
   const args = [
     join(import.meta.dir, "pstack-runner"),
-    "--parent", input.parent,
-    "--provider", input.provider,
-    "--model", input.model,
-    "--effort", input.effort,
+    "--parent-harness", input.parentHarness,
+    "--harness", input.target.harness,
+    "--api-provider", input.target.apiProvider,
+    "--model", input.target.model,
+    "--effort", input.target.effort,
     "--mode", input.mode,
     "--prompt", input.promptPath,
     "--cwd", input.cwd,
@@ -221,11 +295,18 @@ beforeEach(() => {
   bin = join(scratch, "bin");
   mkdirSync(bin);
   writeFileSync(join(scratch, "prompt.md"), "Return the marker.");
-  for (const name of ["claude", "codex", "grok"]) makeExecutable(name);
+  for (const name of ["claude", "codex", "grok", "pi"]) makeExecutable(name);
   previousPath = process.env.PATH;
+  previousHome = process.env.HOME;
+  previousAnthropicBaseUrl = process.env.ANTHROPIC_BASE_URL;
+  previousAnthropicAuthToken = process.env.ANTHROPIC_AUTH_TOKEN;
+  previousAnthropicApiKey = process.env.ANTHROPIC_API_KEY;
+  previousCodexThreadId = process.env.CODEX_THREAD_ID;
+  process.env.HOME = scratch;
   process.env.PATH = `${bin}:${dirname(process.execPath)}:${previousPath ?? ""}`;
   delete process.env.FAKE_TIMEOUT;
   delete process.env.FAKE_INVALID_MODEL;
+  delete process.env.FAKE_LEAKY_FAILURE;
   delete process.env.FAKE_CANCEL;
   delete process.env.FAKE_CANCEL_STAGE;
   delete process.env.FAKE_IGNORE_SIGNAL;
@@ -244,12 +325,29 @@ beforeEach(() => {
   delete process.env.FAKE_DESCENDANT_HOLDS_PIPES_MS;
   delete process.env.FAKE_DESCENDANT_PID_PATH;
   delete process.env.FAKE_SELF_SIGNAL;
+  delete process.env.FAKE_REQUIRE_CLAUDE_PROJECTION;
+  delete process.env.FAKE_GROK_OWN_KEY;
+  delete process.env.FAKE_GROK_AUTH_KIND;
+  delete process.env.FAKE_REJECT_CODEX_IDENTITY;
+  delete process.env.FAKE_REQUIRE_CLAUDE_MODEL_MAPPING;
 });
 
 afterEach(() => {
-  process.env.PATH = previousPath;
+  if (previousPath === undefined) delete process.env.PATH;
+  else process.env.PATH = previousPath;
+  if (previousHome === undefined) delete process.env.HOME;
+  else process.env.HOME = previousHome;
+  if (previousAnthropicBaseUrl === undefined) delete process.env.ANTHROPIC_BASE_URL;
+  else process.env.ANTHROPIC_BASE_URL = previousAnthropicBaseUrl;
+  if (previousAnthropicAuthToken === undefined) delete process.env.ANTHROPIC_AUTH_TOKEN;
+  else process.env.ANTHROPIC_AUTH_TOKEN = previousAnthropicAuthToken;
+  if (previousAnthropicApiKey === undefined) delete process.env.ANTHROPIC_API_KEY;
+  else process.env.ANTHROPIC_API_KEY = previousAnthropicApiKey;
+  if (previousCodexThreadId === undefined) delete process.env.CODEX_THREAD_ID;
+  else process.env.CODEX_THREAD_ID = previousCodexThreadId;
   delete process.env.FAKE_TIMEOUT;
   delete process.env.FAKE_INVALID_MODEL;
+  delete process.env.FAKE_LEAKY_FAILURE;
   delete process.env.FAKE_CANCEL;
   delete process.env.FAKE_CANCEL_STAGE;
   delete process.env.FAKE_IGNORE_SIGNAL;
@@ -268,28 +366,208 @@ afterEach(() => {
   delete process.env.FAKE_DESCENDANT_HOLDS_PIPES_MS;
   delete process.env.FAKE_DESCENDANT_PID_PATH;
   delete process.env.FAKE_SELF_SIGNAL;
+  delete process.env.FAKE_REQUIRE_CLAUDE_PROJECTION;
+  delete process.env.FAKE_GROK_OWN_KEY;
+  delete process.env.FAKE_GROK_AUTH_KIND;
+  delete process.env.FAKE_REJECT_CODEX_IDENTITY;
+  delete process.env.FAKE_REQUIRE_CLAUDE_MODEL_MAPPING;
   rmSync(scratch, { recursive: true, force: true });
 });
 
 describe("runLane", () => {
-  for (const provider of ["claude", "codex", "grok"] as const) {
-    it(`executes and receipts the ${provider} external lane`, async () => {
-      const input = options(provider);
+  it("projects Claude relay env from user settings as one replacement", async () => {
+    const settingsDir = join(scratch, ".claude");
+    mkdirSync(settingsDir);
+    writeFileSync(
+      join(settingsDir, "settings.json"),
+      JSON.stringify({
+        env: {
+          ANTHROPIC_BASE_URL: "settings-base",
+          ANTHROPIC_AUTH_TOKEN: "settings-token",
+        },
+      })
+    );
+    process.env.HOME = scratch;
+    process.env.ANTHROPIC_BASE_URL = "ambient-base";
+    process.env.ANTHROPIC_AUTH_TOKEN = "ambient-token";
+    process.env.ANTHROPIC_API_KEY = "ambient-api-key";
+    process.env.FAKE_REQUIRE_CLAUDE_PROJECTION = "1";
+
+    const input = options("claude", "claude-settings-projection");
+    const result = await runLane(input);
+
+    expect(result.exitCode).toBe(0);
+    expect(receipt(input.receiptPath)).toMatchObject({
+      configuration: {
+        source: "claude-user-settings",
+        importedKeys: ["ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN"],
+        replacedKeys: [
+          "ANTHROPIC_BASE_URL",
+          "ANTHROPIC_AUTH_TOKEN",
+          "ANTHROPIC_API_KEY",
+        ],
+      },
+    });
+    const renderedReceipt = readFileSync(input.receiptPath, "utf8");
+    expect(renderedReceipt).not.toContain("settings-base");
+    expect(renderedReceipt).not.toContain("settings-token");
+    expect(renderedReceipt).not.toContain("ambient-api-key");
+  });
+
+  it("preserves a Claude relay's configured model mapping", async () => {
+    const settingsDir = join(scratch, ".claude");
+    mkdirSync(settingsDir);
+    writeFileSync(
+      join(settingsDir, "settings.json"),
+      JSON.stringify({
+        env: {
+          ANTHROPIC_BASE_URL: "settings-base",
+          ANTHROPIC_AUTH_TOKEN: "settings-token",
+          ANTHROPIC_DEFAULT_FABLE_MODEL: "gateway-fable",
+        },
+      })
+    );
+    process.env.HOME = scratch;
+    process.env.FAKE_REQUIRE_CLAUDE_PROJECTION = "1";
+    process.env.FAKE_REQUIRE_CLAUDE_MODEL_MAPPING = "1";
+    const input = options("claude", "claude-model-mapping");
+
+    const result = await runLane(input);
+
+    expect(result.exitCode).toBe(0);
+    expect(receipt(input.receiptPath)).toMatchObject({
+      configuration: {
+        source: "claude-user-settings",
+        importedKeys: [
+          "ANTHROPIC_BASE_URL",
+          "ANTHROPIC_AUTH_TOKEN",
+          "ANTHROPIC_DEFAULT_FABLE_MODEL",
+        ],
+      },
+      routeProof: {
+        model: {
+          requested: "fable",
+          reported: "gateway-fable",
+          verified: true,
+          evidence: "provider-report",
+        },
+      },
+    });
+  });
+
+  it("accepts Grok's own-API-key authentication banner", async () => {
+    process.env.FAKE_GROK_OWN_KEY = "1";
+    const input = options("grok", "grok-own-key");
+
+    const result = await runLane(input);
+
+    expect(result.exitCode).toBe(0);
+    expect(receipt(input.receiptPath)).toMatchObject({
+      status: "complete",
+      preflight: { status: "passed" },
+    });
+  }, 10_000);
+
+  for (const authKind of ["xai-key", "deployment-key"] as const) {
+    it(`accepts Grok's ${authKind} authentication banner`, async () => {
+      process.env.FAKE_GROK_AUTH_KIND = authKind;
+      const input = options("grok", `grok-${authKind}`);
+
+      expect((await runLane(input)).exitCode).toBe(0);
+      expect(receipt(input.receiptPath)).toMatchObject({
+        status: "complete",
+        preflight: { status: "passed" },
+      });
+    });
+  }
+
+  it("fails malformed or ambiguous Claude relay settings before preflight", async () => {
+    const settingsDir = join(scratch, ".claude");
+    mkdirSync(settingsDir);
+    process.env.HOME = scratch;
+
+    for (const [suffix, settings] of [
+      ["malformed", "{"],
+      [
+        "base-only",
+        JSON.stringify({ env: { ANTHROPIC_BASE_URL: "base-only-value" } }),
+      ],
+      [
+        "ambiguous",
+        JSON.stringify({
+          env: {
+            ANTHROPIC_AUTH_TOKEN: "token-value",
+            ANTHROPIC_API_KEY: "key-value",
+          },
+        }),
+      ],
+    ] as const) {
+      writeFileSync(join(settingsDir, "settings.json"), settings);
+      const preflightStarted = join(scratch, `${suffix}.preflight-started`);
+      process.env.FAKE_PREFLIGHT_STARTED_PATH = preflightStarted;
+      const input = options("claude", `claude-${suffix}-settings`);
+
+      const result = await runLane(input);
+
+      expect(result.exitCode).toBe(70);
+      expect(existsSync(preflightStarted)).toBe(false);
+      expect(receipt(input.receiptPath)).toMatchObject({
+        status: "child-failed",
+        configuration: { source: "claude-user-settings" },
+        preflight: { status: "not-run" },
+      });
+      const renderedReceipt = readFileSync(input.receiptPath, "utf8");
+      expect(renderedReceipt).not.toContain("token-value");
+      expect(renderedReceipt).not.toContain("key-value");
+      expect(renderedReceipt).not.toContain("base-only-value");
+    }
+  });
+
+  it("rejects Pi isolated-write mode before reserving paths or spawning", async () => {
+    const modelStarted = join(scratch, "pi-write-model.started");
+    process.env.FAKE_MODEL_STARTED_PATH = modelStarted;
+    const input = { ...options("pi", "pi-write"), mode: "isolated-write" as const };
+
+    await expect(runLane(input)).rejects.toThrow("read-only lanes only");
+    expect(existsSync(modelStarted)).toBe(false);
+    expect(existsSync(input.outputPath)).toBe(false);
+    expect(existsSync(input.receiptPath)).toBe(false);
+  });
+
+  for (const harness of ["claude", "codex", "grok", "pi"] as const) {
+    it(`executes and receipts the ${harness} external lane`, async () => {
+      const input = options(harness);
       const result = await runLane(input);
       expect(result.exitCode).toBe(0);
       expect(readFileSync(input.outputPath, "utf8")).toContain(
-        provider.toUpperCase()
+        harness.toUpperCase()
       );
       expect(receipt(input.receiptPath)).toMatchObject({
+        schemaVersion: 2,
         status: "complete",
-        provider,
-        model: input.model,
-        modelVerified: provider !== "codex",
-        modelEvidence: provider === "codex" ? "pinned-argv" : "provider-report",
+        target: input.target,
+        routeProof: {
+          apiProvider: {
+            requested: input.target.apiProvider,
+            verified: harness !== "codex",
+            evidence: harness === "codex"
+              ? "pinned-argv"
+              : harness === "pi"
+                ? "provider-report"
+                : "harness-contract",
+          },
+          model: {
+            requested: input.target.model,
+            verified: harness !== "codex",
+            evidence: harness === "codex" ? "pinned-argv" : "provider-report",
+          },
+        },
         preflight: { status: "passed" },
       });
-      if (provider === "claude") {
-        expect(receipt(input.receiptPath).reportedModel).toBe("claude-fable-9-9");
+      if (harness === "claude") {
+        expect(receipt(input.receiptPath).routeProof.model.reported).toBe(
+          "claude-fable-9-9"
+        );
       }
     });
   }
@@ -300,11 +578,45 @@ describe("runLane", () => {
     expect(result.exitCode).toBe(0);
     expect(receipt(input.receiptPath)).toMatchObject({
       status: "complete",
-      model: "gpt-5.6-sol",
-      reportedModel: null,
-      modelVerified: false,
-      modelEvidence: "pinned-argv",
+      target: { apiProvider: "openai", model: "gpt-5.6-sol" },
+      routeProof: {
+        apiProvider: { reported: null, verified: false, evidence: "pinned-argv" },
+        model: { reported: null, verified: false, evidence: "pinned-argv" },
+      },
     });
+  });
+
+  it("runs a named Codex provider externally from a Codex parent", async () => {
+    process.env.CODEX_THREAD_ID = "parent-thread";
+    process.env.FAKE_REJECT_CODEX_IDENTITY = "1";
+    const base = options("codex", "codex-named-provider");
+    const input: RunnerOptions = {
+      ...base,
+      parentHarness: "codex",
+      target: {
+        harness: "codex",
+        apiProvider: "gateway",
+        model: "gpt-5.6-sol",
+        effort: "max",
+      },
+    };
+
+    const result = await runLane(input);
+
+    expect(result.exitCode).toBe(0);
+    expect(receipt(input.receiptPath)).toMatchObject({
+      status: "complete",
+      parentHarness: "codex",
+      target: { harness: "codex", apiProvider: "gateway" },
+      preflight: { status: "passed" },
+      routeProof: {
+        apiProvider: { requested: "gateway", evidence: "pinned-argv" },
+        model: { requested: "gpt-5.6-sol", evidence: "pinned-argv" },
+      },
+    });
+    expect(receipt(input.receiptPath).argv).toEqual(
+      expect.arrayContaining(["--config", 'model_provider="gateway"'])
+    );
   });
 
   it("classifies an unavailable model without falling back", async () => {
@@ -315,11 +627,27 @@ describe("runLane", () => {
     expect(existsSync(input.outputPath)).toBe(false);
     expect(receipt(input.receiptPath)).toMatchObject({
       status: "unavailable-model",
-      model: "gpt-5.6-sol",
-      reportedModel: null,
-      modelVerified: false,
-      modelEvidence: null,
+      target: { model: "gpt-5.6-sol" },
+      routeProof: {
+        model: { reported: null, verified: false, evidence: null },
+      },
     });
+  });
+
+  it("redacts endpoint and credential values from failure receipts", async () => {
+    process.env.FAKE_LEAKY_FAILURE = "1";
+    const input = options("codex", "redacted-failure");
+
+    const result = await runLane(input);
+    const rendered = readFileSync(input.receiptPath, "utf8");
+
+    expect(result.exitCode).toBe(70);
+    expect(rendered).toContain("request failed");
+    expect(rendered).toContain("<redacted>");
+    expect(rendered).not.toContain("relay.example.invalid");
+    expect(rendered).not.toContain("bearer-secret");
+    expect(rendered).not.toContain("token-secret");
+    expect(rendered).not.toContain("key-secret");
   });
 
   it("retries a contradictory Grok authentication preflight before running the model", async () => {
@@ -892,12 +1220,21 @@ describe("runLane", () => {
   });
 
   it("rejects same-provider recursion", async () => {
-    const input = { ...options("claude"), parent: "claude" as const };
+    const input = { ...options("claude"), parentHarness: "claude" as const };
+    await expect(runLane(input)).rejects.toThrow("native to parent");
+  });
+
+  it("rejects the Codex OpenAI native route", async () => {
+    const input = { ...options("codex"), parentHarness: "codex" as const };
     await expect(runLane(input)).rejects.toThrow("native to parent");
   });
 
   it("rejects a versioned Claude family before it can stay pinned", async () => {
-    const input = { ...options("claude"), model: "claude-fable-9-9" };
+    const base = options("claude");
+    const input = {
+      ...base,
+      target: { ...base.target, model: "claude-fable-9-9" },
+    };
     await expect(runLane(input)).rejects.toThrow(
       "normalize it to fable before invoking the runner"
     );
@@ -907,7 +1244,23 @@ describe("runLane", () => {
 });
 
 describe("childEnvironment", () => {
-  it("removes only inherited runtime identity needed to avoid nested detection", () => {
+  it("freezes each resolved provider environment snapshot", () => {
+    const resolved = resolveProviderEnvironment(
+      "codex",
+      {
+        harness: "codex",
+        apiProvider: "gateway",
+        model: "gpt-5.6-sol",
+        effort: "max",
+      },
+      { PATH: "/bin" }
+    );
+
+    expect(resolved.kind).toBe("ready");
+    if (resolved.kind === "ready") expect(Object.isFrozen(resolved.env)).toBe(true);
+  });
+
+  it("removes the parent runtime identity needed to avoid nested detection", () => {
     const source = {
       PATH: "/bin",
       CODEX_THREAD_ID: "codex",
@@ -918,18 +1271,14 @@ describe("childEnvironment", () => {
     };
     expect(childEnvironment("claude", source)).toEqual({
       PATH: "/bin",
-      CLAUDECODE: "1",
-      CLAUDE_CODE_CHILD_SESSION: "1",
-      KEEP_ME: "yes",
-    });
-    expect(childEnvironment("codex", source)).toEqual({
-      PATH: "/bin",
       CODEX_THREAD_ID: "codex",
       CODEX_CI: "1",
       KEEP_ME: "yes",
     });
-    expect(childEnvironment("grok", source)).toEqual({
+    expect(childEnvironment("codex", source)).toEqual({
       PATH: "/bin",
+      CLAUDECODE: "1",
+      CLAUDE_CODE_CHILD_SESSION: "1",
       KEEP_ME: "yes",
     });
   });

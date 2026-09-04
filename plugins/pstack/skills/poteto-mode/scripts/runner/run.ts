@@ -11,14 +11,22 @@ import {
 import { dirname, resolve } from "node:path";
 import { invocationCommand, preflightCommand, type CommandSpec } from "./commands.ts";
 import { versionedClaudeAlias } from "./model-aliases.ts";
+import {
+  childEnvironment,
+  resolveProviderEnvironment,
+} from "./provider-environment.ts";
 import { parseProviderOutput, reportedModelMatches } from "./parse-output.ts";
 import type {
-  Provider,
+  ConfigurationProvenance,
+  LaneTarget,
   ReceiptStatus,
+  RouteProof,
   RunnerOptions,
   RunnerReceipt,
 } from "./types.ts";
 import { UsageError } from "./types.ts";
+
+export { childEnvironment };
 
 const ERROR_EVIDENCE_LIMIT = 4_000;
 const GROK_PREFLIGHT_RETRY_DELAY_MS = 5_000;
@@ -48,8 +56,18 @@ export interface RunResult {
   readonly receipt: RunnerReceipt;
 }
 
+function redactEvidence(value: string): string {
+  return value
+    .replace(
+      /(["']?(?:api[_ -]?key|auth(?:entication)?[_ -]?token|access[_ -]?token|token|secret|password|base[_ -]?url|endpoint)["']?\s*[:=]\s*)(?:"[^"\r\n]*"|'[^'\r\n]*'|[^\s,;]+)/giu,
+      "$1<redacted>"
+    )
+    .replace(/\bBearer\s+[^\s,"']+/giu, "Bearer <redacted>")
+    .replace(/https?:\/\/[^\s,"'`<>\])}]+/giu, "<redacted-url>");
+}
+
 function evidence(value: string): string {
-  return value.trim().slice(0, ERROR_EVIDENCE_LIMIT);
+  return redactEvidence(value).trim().slice(0, ERROR_EVIDENCE_LIMIT);
 }
 
 function removeIfExists(path: string): void {
@@ -110,37 +128,6 @@ function installRunCancellation(): RunCancellation {
       globalThis.process.off("SIGTERM", onTerminate);
     },
   };
-}
-
-const CODEX_IDENTITY = [
-  "CODEX_THREAD_ID",
-  "CODEX_SESSION_ID",
-  "CODEX_CI",
-  "CODEX_SHELL",
-  "CODEX_SANDBOX",
-  "CODEX_SANDBOX_NETWORK_DISABLED",
-  "CODEX_INTERNAL_ORIGINATOR_OVERRIDE",
-] as const;
-
-const CLAUDE_IDENTITY = [
-  "CLAUDECODE",
-  "CLAUDE_CODE_CHILD_SESSION",
-  "CLAUDE_CODE_SESSION_ID",
-  "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS",
-] as const;
-
-export function childEnvironment(
-  provider: Provider,
-  source: NodeJS.ProcessEnv = process.env
-): NodeJS.ProcessEnv {
-  const result = { ...source };
-  const remove = provider === "claude"
-    ? CODEX_IDENTITY
-    : provider === "codex"
-      ? CLAUDE_IDENTITY
-      : [...CODEX_IDENTITY, ...CLAUDE_IDENTITY];
-  for (const key of remove) delete result[key];
-  return result;
 }
 
 async function terminate(
@@ -219,7 +206,7 @@ async function runProcess(
   executable: string,
   spec: CommandSpec,
   cwd: string,
-  env: NodeJS.ProcessEnv,
+  env: Readonly<NodeJS.ProcessEnv>,
   prompt: string,
   deadlineAt: number | null,
   cancellation: RunCancellation
@@ -350,33 +337,104 @@ async function waitForGrokPreflightRetry(
   }
 }
 
-function preflightPassed(provider: Provider, model: string, result: ProcessResult): boolean {
+interface GrokPreflight {
+  readonly authenticated: boolean;
+  readonly modelAvailable: boolean;
+}
+
+function grokPreflight(value: string, model: string): GrokPreflight {
+  const lines = value.split(/\r?\n/);
+  const negative = lines.some(
+    (line) => line.trim() === "You are not authenticated."
+  );
+  const positive = lines.some((line) => {
+    const banner = line.trim();
+    return banner === "You are using XAI_API_KEY."
+      || /^You are logged in with .+\.$/.test(banner)
+      || /^Model '.+' is using its own API key\.$/.test(banner)
+      || banner === "You are authenticated via deployment key.";
+  });
+
+  const available = new Set<string>();
+  let inAvailableModels = false;
+  for (const line of lines) {
+    if (line.trim() === "Available models:") {
+      inAvailableModels = true;
+      continue;
+    }
+    if (!inAvailableModels || line.trim().length === 0) continue;
+    const row = /^\s*[*-]\s+(\S+)(?:\s+\(default\))?\s*$/.exec(line);
+    if (row === null) break;
+    available.add(row[1]);
+  }
+  return {
+    authenticated: !negative && positive,
+    modelAvailable: available.has(model),
+  };
+}
+
+function piPreflight(value: string, apiProvider: string): boolean {
+  try {
+    const raw: unknown = JSON.parse(value.trim());
+    return raw !== null
+      && typeof raw === "object"
+      && !Array.isArray(raw)
+      && "status" in raw
+      && raw.status === "ready"
+      && "provider" in raw
+      && raw.provider === apiProvider;
+  } catch {
+    return false;
+  }
+}
+
+function preflightPassed(target: LaneTarget, result: ProcessResult): boolean {
   if (result.exitCode !== 0 || result.timedOut) return false;
   const combined = `${result.stdout}\n${result.stderr}`;
-  switch (provider) {
+  switch (target.harness) {
     case "claude": {
       try {
         const value: unknown = JSON.parse(result.stdout);
         return (
           value !== null &&
           typeof value === "object" &&
-          (value as { loggedIn?: unknown }).loggedIn === true
+          !Array.isArray(value) &&
+          "loggedIn" in value &&
+          value.loggedIn === true
         );
       } catch {
         return false;
       }
     }
     case "codex":
-      return /logged in/i.test(combined);
+      return target.apiProvider === "openai" ? /logged in/i.test(combined) : true;
     case "grok":
-      return /logged in/i.test(combined) && combined.includes(model);
+      return grokPreflight(combined, target.model).authenticated
+        && grokPreflight(combined, target.model).modelAvailable;
+    case "pi":
+      return piPreflight(result.stdout, target.apiProvider);
   }
 }
 
-function successfulPreflightEvidence(provider: Provider, model: string): string {
-  return provider === "grok"
-    ? `authenticated; model ${model} available`
-    : "authenticated";
+function successfulPreflightEvidence(target: LaneTarget): string {
+  switch (target.harness) {
+    case "claude":
+      return "authenticated";
+    case "codex":
+      return target.apiProvider === "openai"
+        ? "authenticated"
+        : "CLI available; named provider pinned in argv";
+    case "grok":
+      return `authenticated; model ${target.model} available`;
+    case "pi":
+      return `authenticated; provider ${target.apiProvider} and model ${target.model} resolved`;
+  }
+}
+
+function failedPreflightEvidence(target: LaneTarget, raw: string): string {
+  return target.harness === "claude"
+    ? "Claude authentication preflight failed"
+    : raw;
 }
 
 function unavailableStatus(value: string): ReceiptStatus {
@@ -390,15 +448,49 @@ function unavailableStatus(value: string): ReceiptStatus {
 }
 
 function preflightFailureStatus(
-  provider: Provider,
-  model: string,
+  target: LaneTarget,
   value: string
 ): ReceiptStatus {
   const status = unavailableStatus(value);
   if (status !== "child-failed") return status;
-  return provider === "grok" && !value.includes(model)
-    ? "unavailable-model"
-    : "unauthenticated";
+  switch (target.harness) {
+    case "claude":
+      return "unauthenticated";
+    case "codex":
+      return target.apiProvider === "openai" ? "unauthenticated" : "child-failed";
+    case "grok": {
+      const parsed = grokPreflight(value, target.model);
+      return parsed.authenticated && !parsed.modelAvailable
+        ? "unavailable-model"
+        : "unauthenticated";
+    }
+    case "pi": {
+      try {
+        const raw: unknown = JSON.parse(value.trim());
+        if (
+          raw !== null
+          && typeof raw === "object"
+          && !Array.isArray(raw)
+          && "reason" in raw
+          && raw.reason === "provider_not_found"
+        ) {
+          return "unavailable-model";
+        }
+        if (
+          raw !== null
+          && typeof raw === "object"
+          && !Array.isArray(raw)
+          && "status" in raw
+          && raw.status === "not_ready"
+        ) {
+          return "unauthenticated";
+        }
+      } catch {
+        return "child-failed";
+      }
+      return "child-failed";
+    }
+  }
 }
 
 function retriedPreflightEvidence(
@@ -434,46 +526,96 @@ function statusExitCode(status: ReceiptStatus): number {
   }
 }
 
-function modelProof(
-  provider: Provider,
-  requested: string,
-  reported: string | null
-): {
-  readonly reportedModel: string | null;
-  readonly modelVerified: boolean;
-  readonly modelEvidence: "provider-report" | "pinned-argv" | null;
-} {
-  if (reportedModelMatches(provider, requested, reported)) {
-    return {
-      reportedModel: reported,
-      modelVerified: true,
-      modelEvidence: "provider-report",
-    };
-  }
-  if (provider === "codex" && reported === null) {
-    return {
-      reportedModel: null,
-      modelVerified: false,
-      modelEvidence: "pinned-argv",
-    };
-  }
+function unverifiedRouteProof(target: LaneTarget): RouteProof {
   return {
-    reportedModel: reported,
-    modelVerified: false,
-    modelEvidence: null,
+    apiProvider: {
+      requested: target.apiProvider,
+      reported: null,
+      verified: false,
+      evidence: null,
+    },
+    model: {
+      requested: target.model,
+      reported: null,
+      verified: false,
+      evidence: null,
+    },
   };
+}
+
+function routeProof(
+  target: LaneTarget,
+  reportedProvider: string | null,
+  reportedModel: string | null,
+  expectedReportedModel: string | null
+): RouteProof {
+  const provider = target.harness === "pi"
+    ? {
+        requested: target.apiProvider,
+        reported: reportedProvider,
+        verified: reportedProvider === target.apiProvider,
+        evidence: reportedProvider === target.apiProvider
+          ? "provider-report" as const
+          : null,
+      }
+    : target.harness === "codex"
+      ? {
+          requested: target.apiProvider,
+          reported: null,
+          verified: false,
+          evidence: "pinned-argv" as const,
+        }
+      : {
+          requested: target.apiProvider,
+          reported: null,
+          verified: true,
+          evidence: "harness-contract" as const,
+        };
+  const modelMatches = reportedModelMatches(
+    target,
+    reportedModel,
+    expectedReportedModel
+  );
+  const model = modelMatches
+    ? {
+        requested: target.model,
+        reported: reportedModel,
+        verified: true,
+        evidence: "provider-report" as const,
+      }
+    : target.harness === "codex" && reportedModel === null
+      ? {
+          requested: target.model,
+          reported: null,
+          verified: false,
+          evidence: "pinned-argv" as const,
+        }
+      : {
+          requested: target.model,
+          reported: reportedModel,
+          verified: false,
+          evidence: null,
+        };
+  return { apiProvider: provider, model };
 }
 
 function completeReceipt(
   options: RunnerOptions,
-  partial: Omit<RunnerReceipt, "schemaVersion" | "parent" | "provider" | "model" | "effort" | "mode" | "cwd" | "promptPath" | "outputPath">
+  partial: Omit<
+    RunnerReceipt,
+    | "schemaVersion"
+    | "parentHarness"
+    | "target"
+    | "mode"
+    | "cwd"
+    | "promptPath"
+    | "outputPath"
+  >
 ): RunnerReceipt {
   return {
-    schemaVersion: 1,
-    parent: options.parent,
-    provider: options.provider,
-    model: options.model,
-    effort: options.effort,
+    schemaVersion: 2,
+    parentHarness: options.parentHarness,
+    target: options.target,
     mode: options.mode,
     cwd: options.cwd,
     promptPath: options.promptPath,
@@ -483,18 +625,33 @@ function completeReceipt(
 }
 
 export function validateOptions(options: RunnerOptions): void {
-  if (options.parent === options.provider) {
+  const usesParentNativeRoute =
+    (options.parentHarness === "claude" && options.target.harness === "claude")
+    || (
+      options.parentHarness === "codex"
+      && options.target.harness === "codex"
+      && options.target.apiProvider === "openai"
+    );
+  if (usesParentNativeRoute) {
     throw new UsageError(
-      `provider ${options.provider} is native to parent ${options.parent}; use the parent subagent primitive`
+      `target ${options.target.harness}[${options.target.apiProvider}] is native to parent ${options.parentHarness}; use the parent subagent primitive`
     );
   }
-  if (options.model.trim().length === 0) throw new UsageError("model must not be empty");
-  const staleAlias = options.provider === "claude"
-    ? versionedClaudeAlias(options.model)
+  if (options.target.model.trim().length === 0) {
+    throw new UsageError("model must not be empty");
+  }
+  if (options.target.apiProvider.trim().length === 0) {
+    throw new UsageError("api-provider must not be empty");
+  }
+  if (options.target.harness === "pi" && options.mode === "isolated-write") {
+    throw new UsageError("Pi supports read-only lanes only");
+  }
+  const staleAlias = options.target.harness === "claude"
+    ? versionedClaudeAlias(options.target.model)
     : null;
   if (staleAlias !== null) {
     throw new UsageError(
-      `Claude model ${options.model} is a version pin; normalize it to ${staleAlias} before invoking the runner`
+      `Claude model ${options.target.model} is a version pin; normalize it to ${staleAlias} before invoking the runner`
     );
   }
   if (
@@ -519,6 +676,7 @@ export function validateOptions(options: RunnerOptions): void {
 
 interface LaneProgress {
   executable: string | null;
+  configuration: ConfigurationProvenance;
   preflight: RunnerReceipt["preflight"];
   argv: readonly string[];
 }
@@ -534,7 +692,13 @@ async function executeLane(
 ): Promise<RunResult> {
   const startedAt = new Date(started).toISOString();
   const prompt = readFileSync(options.promptPath, "utf8");
-  const env = childEnvironment(options.provider);
+  const environment = resolveProviderEnvironment(
+    options.parentHarness,
+    options.target
+  );
+  progress.configuration = environment.configuration;
+  if (environment.kind === "invalid") throw new Error(environment.message);
+  const env = environment.env;
   const executable = Bun.which(invocation.command, {
     PATH: env.PATH,
     cwd: options.cwd,
@@ -560,13 +724,12 @@ async function executeLane(
       completedAt: new Date(completed).toISOString(),
       elapsedMs: completed - started,
       executable,
+      configuration: progress.configuration,
       preflight: terminalPreflight,
       argv: [executable ?? invocation.command, ...invocation.args],
       exitCode: null,
       signal: null,
-      reportedModel: null,
-      modelVerified: false,
-      modelEvidence: null,
+      routeProof: unverifiedRouteProof(options.target),
       sessionId: null,
       usage: null,
       costUsd: null,
@@ -597,13 +760,12 @@ async function executeLane(
       completedAt: new Date(completed).toISOString(),
       elapsedMs: completed - started,
       executable: null,
+      configuration: progress.configuration,
       preflight: preflightState,
       argv: [invocation.command, ...invocation.args],
       exitCode: null,
       signal: null,
-      reportedModel: null,
-      modelVerified: false,
-      modelEvidence: null,
+      routeProof: unverifiedRouteProof(options.target),
       sessionId: null,
       usage: null,
       costUsd: null,
@@ -628,17 +790,17 @@ async function executeLane(
     cancellation
   );
   let rawPreflightEvidence = evidence(`${preflightResult.stdout}\n${preflightResult.stderr}`);
-  let passed = preflightPassed(options.provider, options.model, preflightResult);
+  let passed = preflightPassed(options.target, preflightResult);
   let preflightEvidence = passed
-    ? successfulPreflightEvidence(options.provider, options.model)
-    : rawPreflightEvidence;
+    ? successfulPreflightEvidence(options.target)
+    : failedPreflightEvidence(options.target, rawPreflightEvidence);
 
   if (
-    options.provider === "grok" &&
+    options.target.harness === "grok" &&
     !passed &&
     preflightResult.cancelledBy === null &&
     !preflightResult.timedOut &&
-    preflightFailureStatus(options.provider, options.model, rawPreflightEvidence) ===
+    preflightFailureStatus(options.target, rawPreflightEvidence) ===
       "unauthenticated"
   ) {
     preflightState = {
@@ -672,11 +834,11 @@ async function executeLane(
       cancellation
     );
     rawPreflightEvidence = evidence(`${preflightResult.stdout}\n${preflightResult.stderr}`);
-    passed = preflightPassed(options.provider, options.model, preflightResult);
+    passed = preflightPassed(options.target, preflightResult);
     preflightEvidence = retriedPreflightEvidence(
       firstPreflightEvidence,
       passed
-        ? successfulPreflightEvidence(options.provider, options.model)
+        ? successfulPreflightEvidence(options.target)
         : rawPreflightEvidence,
       passed
     );
@@ -698,8 +860,7 @@ async function executeLane(
   if (preflightState.status !== "passed") {
     const completed = Date.now();
     const preflightFailure = preflightFailureStatus(
-      options.provider,
-      options.model,
+      options.target,
       rawPreflightEvidence
     );
     const status: ReceiptStatus = preflightResult.cancelledBy !== null
@@ -713,13 +874,12 @@ async function executeLane(
       completedAt: new Date(completed).toISOString(),
       elapsedMs: completed - started,
       executable,
+      configuration: progress.configuration,
       preflight: preflightState,
       argv: [executable, ...invocation.args],
       exitCode: preflightResult.exitCode,
       signal: preflightResult.signal,
-      reportedModel: null,
-      modelVerified: false,
-      modelEvidence: null,
+      routeProof: unverifiedRouteProof(options.target),
       sessionId: null,
       usage: null,
       costUsd: null,
@@ -759,6 +919,7 @@ async function executeLane(
     completedAt: new Date(completed).toISOString(),
     elapsedMs: completed - started,
     executable,
+    configuration: progress.configuration,
     preflight: preflightState,
     argv: [executable, ...invocation.args],
     exitCode: result.exitCode,
@@ -776,9 +937,7 @@ async function executeLane(
     receipt = completeReceipt(options, {
       ...base,
       status,
-      reportedModel: null,
-      modelVerified: false,
-      modelEvidence: null,
+      routeProof: unverifiedRouteProof(options.target),
       sessionId: null,
       usage: null,
       costUsd: null,
@@ -800,26 +959,30 @@ async function executeLane(
 
   try {
     const parsed = parseProviderOutput(
-      options.provider,
+      options.target,
       result.stdout,
       result.stderr,
-      options.model
+      environment.expectedReportedModel
     );
-    const proof = modelProof(
-      options.provider,
-      options.model,
-      parsed.reportedModel
+    const proof = routeProof(
+      options.target,
+      parsed.reportedProvider,
+      parsed.reportedModel,
+      environment.expectedReportedModel
     );
-    if (!proof.modelVerified && proof.modelEvidence !== "pinned-argv") {
+    if (
+      (!proof.apiProvider.verified && proof.apiProvider.evidence !== "pinned-argv")
+      || (!proof.model.verified && proof.model.evidence !== "pinned-argv")
+    ) {
       throw new Error(
-        `requested model ${options.model} was not reported by ${options.provider}`
+        `requested route ${options.target.apiProvider}/${options.target.model} was not reported by ${options.target.harness}`
       );
     }
     writeFileSync(options.outputPath, parsed.text, { encoding: "utf8", mode: 0o600 });
     receipt = completeReceipt(options, {
       ...base,
       status: "complete",
-      ...proof,
+      routeProof: proof,
       sessionId: parsed.sessionId,
       usage: parsed.usage,
       costUsd: parsed.costUsd,
@@ -831,9 +994,7 @@ async function executeLane(
     receipt = completeReceipt(options, {
       ...base,
       status: "malformed-output",
-      reportedModel: null,
-      modelVerified: false,
-      modelEvidence: null,
+      routeProof: unverifiedRouteProof(options.target),
       sessionId: null,
       usage: null,
       costUsd: null,
@@ -855,9 +1016,20 @@ export async function runLane(
   validateOptions(options);
   const deadlineAt = options.timeoutMs === null ? null : started + options.timeoutMs;
   const invocation = invocationCommand(options);
-  const preflight = preflightCommand(options.provider);
+  const preflight = preflightCommand(options.target);
   const progress: LaneProgress = {
     executable: null,
+    configuration: options.target.harness === "claude"
+      ? {
+          source: "process-environment",
+          importedKeys: [],
+          replacedKeys: [],
+        }
+      : {
+          source: "harness-user-configuration",
+          importedKeys: [],
+          replacedKeys: [],
+        },
     preflight: {
       argv: [preflight.command, ...preflight.args],
       status: "not-run",
@@ -896,13 +1068,12 @@ export async function runLane(
         completedAt: new Date(completed).toISOString(),
         elapsedMs: completed - started,
         executable: progress.executable,
+        configuration: progress.configuration,
         preflight: terminalPreflight,
         argv: progress.argv,
         exitCode: null,
         signal: null,
-        reportedModel: null,
-        modelVerified: false,
-        modelEvidence: null,
+        routeProof: unverifiedRouteProof(options.target),
         sessionId: null,
         usage: null,
         costUsd: null,

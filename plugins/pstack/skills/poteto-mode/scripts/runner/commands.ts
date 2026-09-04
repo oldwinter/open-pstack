@@ -1,7 +1,7 @@
 import type {
   AccessMode,
   Effort,
-  Provider,
+  LaneTarget,
   RunnerOptions,
 } from "./types.ts";
 
@@ -11,8 +11,8 @@ export interface CommandSpec {
   readonly stdin: "prompt" | "none";
 }
 
-export function preflightCommand(provider: Provider): CommandSpec {
-  switch (provider) {
+export function preflightCommand(target: LaneTarget): CommandSpec {
+  switch (target.harness) {
     case "claude":
       return {
         command: "claude",
@@ -20,13 +20,30 @@ export function preflightCommand(provider: Provider): CommandSpec {
         stdin: "none",
       };
     case "codex":
-      return {
-        command: "codex",
-        args: ["login", "status"],
-        stdin: "none",
-      };
+      return target.apiProvider === "openai"
+        ? {
+            command: "codex",
+            args: ["login", "status"],
+            stdin: "none",
+          }
+        : { command: "codex", args: ["--version"], stdin: "none" };
     case "grok":
       return { command: "grok", args: ["models"], stdin: "none" };
+    case "pi":
+      return {
+        command: "pi",
+        args: [
+          "auth",
+          "check",
+          "--provider",
+          target.apiProvider,
+          "--model",
+          target.model,
+          "--json",
+          "--no-refresh",
+        ],
+        stdin: "none",
+      };
   }
 }
 
@@ -63,17 +80,22 @@ function effortOverride(effort: Effort): string {
   return `model_reasoning_effort=${JSON.stringify(effort)}`;
 }
 
+function providerOverride(apiProvider: string): string {
+  return `model_provider=${JSON.stringify(apiProvider)}`;
+}
+
 export function invocationCommand(options: RunnerOptions): CommandSpec {
-  switch (options.provider) {
+  const target = options.target;
+  switch (target.harness) {
     case "claude":
       return {
         command: "claude",
         args: [
           "-p",
           "--model",
-          options.model,
+          target.model,
           "--effort",
-          options.effort,
+          target.effort,
           "--permission-mode",
           permissionMode(options.mode),
           "--setting-sources",
@@ -96,9 +118,11 @@ export function invocationCommand(options: RunnerOptions): CommandSpec {
         args: [
           "exec",
           "--model",
-          options.model,
+          target.model,
           "--config",
-          effortOverride(options.effort),
+          providerOverride(target.apiProvider),
+          "--config",
+          effortOverride(target.effort),
           "--sandbox",
           codexSandbox(options.mode),
           "--cd",
@@ -125,9 +149,9 @@ export function invocationCommand(options: RunnerOptions): CommandSpec {
           "--prompt-file",
           options.promptPath,
           "--model",
-          options.model,
+          target.model,
           "--reasoning-effort",
-          options.effort,
+          target.effort,
           "--permission-mode",
           permissionMode(options.mode),
           "--sandbox",
@@ -145,6 +169,31 @@ export function invocationCommand(options: RunnerOptions): CommandSpec {
           "--verbatim",
         ],
         stdin: "none",
+      };
+    case "pi":
+      return {
+        command: "pi",
+        args: [
+          "--print",
+          "--mode",
+          "json",
+          "--provider",
+          target.apiProvider,
+          "--model",
+          target.model,
+          "--thinking",
+          target.effort,
+          "--no-session",
+          "--no-extensions",
+          "--no-skills",
+          "--no-prompt-templates",
+          "--no-themes",
+          "--approve",
+          "--offline",
+          "--tools",
+          "read,grep,find,ls",
+        ],
+        stdin: "prompt",
       };
   }
 }
