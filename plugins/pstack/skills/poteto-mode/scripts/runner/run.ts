@@ -546,7 +546,8 @@ function unverifiedRouteProof(target: LaneTarget): RouteProof {
 function routeProof(
   target: LaneTarget,
   reportedProvider: string | null,
-  reportedModel: string | null
+  reportedModel: string | null,
+  expectedReportedModel: string | null
 ): RouteProof {
   const provider = target.harness === "pi"
     ? {
@@ -570,7 +571,11 @@ function routeProof(
           verified: true,
           evidence: "harness-contract" as const,
         };
-  const modelMatches = reportedModelMatches(target, reportedModel);
+  const modelMatches = reportedModelMatches(
+    target,
+    reportedModel,
+    expectedReportedModel
+  );
   const model = modelMatches
     ? {
         requested: target.model,
@@ -956,12 +961,14 @@ async function executeLane(
     const parsed = parseProviderOutput(
       options.target,
       result.stdout,
-      result.stderr
+      result.stderr,
+      environment.expectedReportedModel
     );
     const proof = routeProof(
       options.target,
       parsed.reportedProvider,
-      parsed.reportedModel
+      parsed.reportedModel,
+      environment.expectedReportedModel
     );
     if (
       (!proof.apiProvider.verified && proof.apiProvider.evidence !== "pinned-argv")

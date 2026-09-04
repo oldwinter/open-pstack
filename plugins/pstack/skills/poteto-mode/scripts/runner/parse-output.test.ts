@@ -227,6 +227,12 @@ describe("parseProviderOutput", () => {
     expect(reportedModelMatches(claudeTarget, "fable")).toBe(false);
     expect(reportedModelMatches(claudeTarget, "fable-preview")).toBe(false);
     expect(reportedModelMatches(grokTarget, "claude-fable-9-9")).toBe(false);
+    expect(
+      reportedModelMatches(claudeTarget, "gateway-fable", "gateway-fable")
+    ).toBe(true);
+    expect(
+      reportedModelMatches(claudeTarget, "claude-fable-9-9", "gateway-fable")
+    ).toBe(false);
   });
 
   it("rejects malformed or textless responses", () => {

@@ -2,8 +2,8 @@ import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import {
-  CLAUDE_RELAY_ENV_KEYS,
-  type ClaudeRelayEnvKey,
+  CLAUDE_PROVIDER_ENV_KEYS,
+  type ClaudeProviderEnvKey,
   type ConfigurationProvenance,
   type LaneTarget,
   type ParentHarness,
@@ -33,6 +33,7 @@ export type ProviderEnvironmentResolution =
       readonly kind: "ready";
       readonly env: Readonly<NodeJS.ProcessEnv>;
       readonly configuration: ConfigurationProvenance;
+      readonly expectedReportedModel: string | null;
     }
   | {
       readonly kind: "invalid";
@@ -96,6 +97,23 @@ function claudeSettingsPath(source: NodeJS.ProcessEnv): string {
   return join(home, ".claude", "settings.json");
 }
 
+function expectedClaudeModel(
+  target: LaneTarget,
+  environment: Readonly<NodeJS.ProcessEnv>
+): string | null {
+  if (target.harness !== "claude") return null;
+  const key = target.model === "fable"
+    ? "ANTHROPIC_DEFAULT_FABLE_MODEL"
+    : target.model === "opus"
+      ? "ANTHROPIC_DEFAULT_OPUS_MODEL"
+      : target.model === "sonnet"
+        ? "ANTHROPIC_DEFAULT_SONNET_MODEL"
+        : target.model === "haiku"
+          ? "ANTHROPIC_DEFAULT_HAIKU_MODEL"
+          : null;
+  return key === null ? null : environment[key]?.trim() || null;
+}
+
 export function resolveProviderEnvironment(
   parentHarness: ParentHarness,
   target: LaneTarget,
@@ -107,6 +125,7 @@ export function resolveProviderEnvironment(
       kind: "ready",
       env: frozenEnvironment(base),
       configuration: harnessConfiguration(),
+      expectedReportedModel: null,
     };
   }
 
@@ -116,6 +135,7 @@ export function resolveProviderEnvironment(
       kind: "ready",
       env: frozenEnvironment(base),
       configuration: processConfiguration(),
+      expectedReportedModel: expectedClaudeModel(target, base),
     };
   }
 
@@ -134,6 +154,7 @@ export function resolveProviderEnvironment(
       kind: "ready",
       env: frozenEnvironment(base),
       configuration: processConfiguration(),
+      expectedReportedModel: expectedClaudeModel(target, base),
     };
   }
   const settingsEnv = jsonObject(settings.env);
@@ -141,8 +162,8 @@ export function resolveProviderEnvironment(
     return invalidClaudeConfiguration("Claude user settings env must contain a JSON object");
   }
 
-  const projection = new Map<ClaudeRelayEnvKey, string>();
-  for (const key of CLAUDE_RELAY_ENV_KEYS) {
+  const projection = new Map<ClaudeProviderEnvKey, string>();
+  for (const key of CLAUDE_PROVIDER_ENV_KEYS) {
     if (!(key in settingsEnv)) continue;
     const value = settingsEnv[key];
     if (typeof value !== "string" || value.length === 0 || value.includes("\0")) {
@@ -155,6 +176,7 @@ export function resolveProviderEnvironment(
       kind: "ready",
       env: frozenEnvironment(base),
       configuration: processConfiguration(),
+      expectedReportedModel: expectedClaudeModel(target, base),
     };
   }
   if (projection.has("ANTHROPIC_AUTH_TOKEN") && projection.has("ANTHROPIC_API_KEY")) {
@@ -172,15 +194,16 @@ export function resolveProviderEnvironment(
     );
   }
 
-  const replacedKeys = CLAUDE_RELAY_ENV_KEYS.filter((key) => base[key] !== undefined);
-  for (const key of CLAUDE_RELAY_ENV_KEYS) delete base[key];
+  const replacedKeys = CLAUDE_PROVIDER_ENV_KEYS.filter((key) => base[key] !== undefined);
+  for (const key of CLAUDE_PROVIDER_ENV_KEYS) delete base[key];
   for (const [key, value] of projection) base[key] = value;
   return {
     kind: "ready",
     env: frozenEnvironment(base),
+    expectedReportedModel: expectedClaudeModel(target, base),
     configuration: {
       source: "claude-user-settings",
-      importedKeys: CLAUDE_RELAY_ENV_KEYS.filter((key) => projection.has(key)),
+      importedKeys: CLAUDE_PROVIDER_ENV_KEYS.filter((key) => projection.has(key)),
       replacedKeys,
     },
   };

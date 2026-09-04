@@ -2,17 +2,21 @@ export const PARENT_HARNESSES = ["claude", "codex"] as const;
 export const EXECUTION_HARNESSES = ["claude", "codex", "grok", "pi"] as const;
 export const EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const;
 export const ACCESS_MODES = ["read-only", "isolated-write"] as const;
-export const CLAUDE_RELAY_ENV_KEYS = [
+export const CLAUDE_PROVIDER_ENV_KEYS = [
   "ANTHROPIC_BASE_URL",
   "ANTHROPIC_AUTH_TOKEN",
   "ANTHROPIC_API_KEY",
+  "ANTHROPIC_DEFAULT_FABLE_MODEL",
+  "ANTHROPIC_DEFAULT_OPUS_MODEL",
+  "ANTHROPIC_DEFAULT_SONNET_MODEL",
+  "ANTHROPIC_DEFAULT_HAIKU_MODEL",
 ] as const;
 
 export type ParentHarness = (typeof PARENT_HARNESSES)[number];
 export type ExecutionHarness = (typeof EXECUTION_HARNESSES)[number];
 export type Effort = (typeof EFFORTS)[number];
 export type AccessMode = (typeof ACCESS_MODES)[number];
-export type ClaudeRelayEnvKey = (typeof CLAUDE_RELAY_ENV_KEYS)[number];
+export type ClaudeProviderEnvKey = (typeof CLAUDE_PROVIDER_ENV_KEYS)[number];
 
 interface TargetRoute {
   readonly model: string;
@@ -98,8 +102,8 @@ export interface ConfigurationProvenance {
     | "process-environment"
     | "claude-user-settings"
     | "harness-user-configuration";
-  readonly importedKeys: readonly ClaudeRelayEnvKey[];
-  readonly replacedKeys: readonly ClaudeRelayEnvKey[];
+  readonly importedKeys: readonly ClaudeProviderEnvKey[];
+  readonly replacedKeys: readonly ClaudeProviderEnvKey[];
 }
 
 export interface RunnerReceipt {

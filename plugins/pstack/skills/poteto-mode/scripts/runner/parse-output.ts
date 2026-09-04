@@ -61,16 +61,26 @@ function normalizedPiUsage(value: unknown): NormalizedUsage | null {
     : null;
 }
 
-function modelFromUsage(value: unknown, target: LaneTarget): string | null {
+function modelFromUsage(
+  value: unknown,
+  target: LaneTarget,
+  expectedReportedModel: string | null = null
+): string | null {
   const usage = object(value);
   if (usage === null) return null;
   const models = Object.keys(usage);
-  return models.find((model) => reportedModelMatches(target, model))
+  return models.find((model) =>
+    reportedModelMatches(target, model, expectedReportedModel)
+  )
     ?? models[0]
     ?? null;
 }
 
-function parseClaude(stdout: string, target: LaneTarget): ParsedOutput {
+function parseClaude(
+  stdout: string,
+  target: LaneTarget,
+  expectedReportedModel: string | null
+): ParsedOutput {
   let raw: unknown;
   try {
     raw = JSON.parse(stdout);
@@ -87,7 +97,7 @@ function parseClaude(stdout: string, target: LaneTarget): ParsedOutput {
   return {
     text,
     reportedProvider: null,
-    reportedModel: modelFromUsage(value.modelUsage, target),
+    reportedModel: modelFromUsage(value.modelUsage, target, expectedReportedModel),
     sessionId: nullableString(value.session_id ?? value.sessionId),
     usage: normalizedUsage(value.usage),
     costUsd: finiteNumber(value.total_cost_usd) ?? null,
@@ -256,11 +266,12 @@ function parsePi(stdout: string, target: LaneTarget): ParsedOutput {
 export function parseProviderOutput(
   target: LaneTarget,
   stdout: string,
-  _stderr: string
+  _stderr: string,
+  expectedReportedModel: string | null = null
 ): ParsedOutput {
   switch (target.harness) {
     case "claude":
-      return parseClaude(stdout, target);
+      return parseClaude(stdout, target, expectedReportedModel);
     case "codex":
       return parseCodex(stdout);
     case "grok":
@@ -272,9 +283,11 @@ export function parseProviderOutput(
 
 export function reportedModelMatches(
   target: LaneTarget,
-  reported: string | null
+  reported: string | null,
+  expectedReportedModel: string | null = null
 ): boolean {
   if (reported === null) return false;
+  if (expectedReportedModel !== null) return reported === expectedReportedModel;
   if (target.harness === "claude" && isRollingClaudeAlias(target.model)) {
     return concreteModelMatchesRollingAlias(target.model, reported);
   }

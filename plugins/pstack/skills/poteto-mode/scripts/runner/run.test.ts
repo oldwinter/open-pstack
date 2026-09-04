@@ -43,7 +43,11 @@ if (process.env.FAKE_REJECT_CODEX_IDENTITY === "1" && process.env.CODEX_THREAD_I
 const claudeProjectionMatches = process.env.FAKE_REQUIRE_CLAUDE_PROJECTION !== "1" || (
   process.env.ANTHROPIC_BASE_URL === "settings-base" &&
   process.env.ANTHROPIC_AUTH_TOKEN === "settings-token" &&
-  process.env.ANTHROPIC_API_KEY === undefined
+  process.env.ANTHROPIC_API_KEY === undefined &&
+  (
+    process.env.FAKE_REQUIRE_CLAUDE_MODEL_MAPPING !== "1" ||
+    process.env.ANTHROPIC_DEFAULT_FABLE_MODEL === "gateway-fable"
+  )
 );
 const startedPath = isPreflight
   ? process.env.FAKE_PREFLIGHT_STARTED_PATH
@@ -125,7 +129,7 @@ if (name === "grok" && args[0] === "models") {
 const modelIndex = args.findIndex((value) => value === "--model");
 const model = modelIndex >= 0 ? args[modelIndex + 1] : "unknown";
 const reportedModel = model === "fable"
-  ? "claude-fable-9-9"
+  ? process.env.ANTHROPIC_DEFAULT_FABLE_MODEL ?? "claude-fable-9-9"
   : model === "opus"
     ? "claude-opus-9"
     : model;
@@ -298,6 +302,7 @@ beforeEach(() => {
   previousAnthropicAuthToken = process.env.ANTHROPIC_AUTH_TOKEN;
   previousAnthropicApiKey = process.env.ANTHROPIC_API_KEY;
   previousCodexThreadId = process.env.CODEX_THREAD_ID;
+  process.env.HOME = scratch;
   process.env.PATH = `${bin}:${dirname(process.execPath)}:${previousPath ?? ""}`;
   delete process.env.FAKE_TIMEOUT;
   delete process.env.FAKE_INVALID_MODEL;
@@ -324,6 +329,7 @@ beforeEach(() => {
   delete process.env.FAKE_GROK_OWN_KEY;
   delete process.env.FAKE_GROK_AUTH_KIND;
   delete process.env.FAKE_REJECT_CODEX_IDENTITY;
+  delete process.env.FAKE_REQUIRE_CLAUDE_MODEL_MAPPING;
 });
 
 afterEach(() => {
@@ -364,6 +370,7 @@ afterEach(() => {
   delete process.env.FAKE_GROK_OWN_KEY;
   delete process.env.FAKE_GROK_AUTH_KIND;
   delete process.env.FAKE_REJECT_CODEX_IDENTITY;
+  delete process.env.FAKE_REQUIRE_CLAUDE_MODEL_MAPPING;
   rmSync(scratch, { recursive: true, force: true });
 });
 
@@ -405,6 +412,47 @@ describe("runLane", () => {
     expect(renderedReceipt).not.toContain("settings-base");
     expect(renderedReceipt).not.toContain("settings-token");
     expect(renderedReceipt).not.toContain("ambient-api-key");
+  });
+
+  it("preserves a Claude relay's configured model mapping", async () => {
+    const settingsDir = join(scratch, ".claude");
+    mkdirSync(settingsDir);
+    writeFileSync(
+      join(settingsDir, "settings.json"),
+      JSON.stringify({
+        env: {
+          ANTHROPIC_BASE_URL: "settings-base",
+          ANTHROPIC_AUTH_TOKEN: "settings-token",
+          ANTHROPIC_DEFAULT_FABLE_MODEL: "gateway-fable",
+        },
+      })
+    );
+    process.env.HOME = scratch;
+    process.env.FAKE_REQUIRE_CLAUDE_PROJECTION = "1";
+    process.env.FAKE_REQUIRE_CLAUDE_MODEL_MAPPING = "1";
+    const input = options("claude", "claude-model-mapping");
+
+    const result = await runLane(input);
+
+    expect(result.exitCode).toBe(0);
+    expect(receipt(input.receiptPath)).toMatchObject({
+      configuration: {
+        source: "claude-user-settings",
+        importedKeys: [
+          "ANTHROPIC_BASE_URL",
+          "ANTHROPIC_AUTH_TOKEN",
+          "ANTHROPIC_DEFAULT_FABLE_MODEL",
+        ],
+      },
+      routeProof: {
+        model: {
+          requested: "fable",
+          reported: "gateway-fable",
+          verified: true,
+          evidence: "provider-report",
+        },
+      },
+    });
   });
 
   it("accepts Grok's own-API-key authentication banner", async () => {
