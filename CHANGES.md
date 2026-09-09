@@ -1,8 +1,8 @@
 # CHANGES — applied substitutions
 
-## 1.4.0-oldwinter.2 merges the 0.15.0 sync
+## 1.4.0 follows the upstream distribution version
 
-This fork merges ericlitman/open-pstack through `c8481f7`, including the Cursor pstack 0.15.0 content and upstream merge-tool safeguards. It retains the custom-provider routes, schema 2 receipts, and `oldwinter-open-pstack` marketplace identity from 1.4.0-oldwinter.1. How is explain-only, and setup renders 15 roles without the retired `how critics` row.
+This release supersedes `1.4.0-oldwinter.2` and follows the upstream distribution version without a fork suffix. It merges ericlitman/open-pstack through `c8481f7`, including the Cursor pstack 0.15.0 content and upstream merge-tool safeguards. It retains the custom-provider routes, schema 2 receipts, and `oldwinter-open-pstack` marketplace identity from 1.4.0-oldwinter.1. How is explain-only, and setup renders 15 roles without the retired `how critics` row.
 
 This port applies the Cursor → Claude Code substitutions in skill bodies. Earlier drafts left them flagged; this revision resolves them. A later pass added a Codex build that shares the same skills; see [Codex port](#codex-port) below.
 
@@ -10,7 +10,7 @@ This port applies the Cursor → Claude Code substitutions in skill bodies. Earl
 
 Model sheets and runner receipts now use schema 2 targets that separate the execution harness, API provider, model, and requested effort. Claude projects an exact, frozen allowlist from `~/.claude/settings.json` for relay connections and provider model pins without persisting values. Codex can pin a named provider in argv, Grok preflight follows its documented authentication banners and exact available-model rows, and vanilla Pi 0.84.4 adds a read-only JSONL lane with provider/model and terminal-state verification. Every route remains parent-owned, preflighted without fallback, and recorded in a schema 2 receipt whose configuration evidence is redacted.
 
-The setup skill migrates released schema 1 descriptors in memory, preserves valid custom routes, probes every distinct target, and writes only after complete validation and confirmation. The runner retains exclusive `0600` reservations, absolute deadlines, cancellation receipts, Claude rolling-alias verification, and Grok's single unauthenticated preflight retry. This fork uses version `1.4.0-oldwinter.1`, marketplace `oldwinter-open-pstack`, and plugin ID `pstack@oldwinter-open-pstack` so it can be evaluated beside the upstream distribution.
+The setup skill migrates released schema 1 descriptors in memory, preserves valid custom routes, probes every distinct target, and writes only after complete validation and confirmation. The runner retains exclusive `0600` reservations, absolute deadlines, cancellation receipts, Claude rolling-alias verification, and Grok's single unauthenticated preflight retry. That evaluation used version `1.4.0-oldwinter.1`, marketplace `oldwinter-open-pstack`, and plugin ID `pstack@oldwinter-open-pstack` so it can be evaluated beside the upstream distribution.
 
 ## 1.4.0 syncs to Cursor pstack 0.15.0
 
