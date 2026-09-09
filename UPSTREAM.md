@@ -10,9 +10,9 @@ open-pstack tracks [Cursor's pstack](https://github.com/cursor/plugins/tree/main
 | Path | `pstack/` |
 | Commit | `71ed0d1076fec562c1b74ee353121a8d00f75382` |
 | Upstream version | `0.15.0` |
-| open-pstack version | `1.4.0-oldwinter.2` |
+| open-pstack version | `1.4.0` |
 
-The table above is the current Cursor sync point. Open Pstack 1.4.0-oldwinter.2 imports this 0.15.0 sync. `README-UPSTREAM.md` preserves its pstack README verbatim. `CHANGES.md` and `NOTICE.md` describe the adaptations and provenance.
+The table above is the current Cursor sync point. Open Pstack 1.4.0 imports this 0.15.0 sync. `README-UPSTREAM.md` preserves its pstack README verbatim. `CHANGES.md` and `NOTICE.md` describe the adaptations and provenance.
 
 ## Upstream-only exclusions
 
@@ -47,5 +47,7 @@ No output means the tracked pstack tree has not changed. This comparison does no
 4. Update the commit and version in this file, the affected provenance rows in `NOTICE.md`, and `README-UPSTREAM.md` when upstream changes it.
 5. Run CI-equivalent checks locally, then run the installed Claude Code and Codex behavioral lanes required by the changed surface. Unit tests alone are not a release gate.
 6. Merge the reviewed PR before tagging the next open-pstack release.
+
+Distribution version numbers and release tags follow `ericlitman/open-pstack` exactly. Fork adaptations retain the `oldwinter-open-pstack` marketplace identity without adding a version suffix.
 
 Cursor's version and open-pstack's version are independent. Cursor's version identifies the imported content; open-pstack's version identifies the cross-harness distribution.
