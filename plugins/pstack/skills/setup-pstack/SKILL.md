@@ -99,7 +99,6 @@ judgment and prose: claude[anthropic]:fable@max
 hardest tasks: claude[anthropic]:fable@max
 how explorer: grok[xai]:grok-4.6@xhigh
 how explainer: claude[anthropic]:fable@max
-how critics: claude[anthropic]:fable@max, codex[openai]:gpt-5.6-sol@max, grok[xai]:grok-4.6@xhigh, claude[anthropic]:opus@xhigh
 why investigators, synthesizer: inherit-parent
 reflect tooling, judgment, divergent, synthesizer: inherit-parent
 arena runners: claude[anthropic]:fable@max, codex[openai]:gpt-5.6-sol@max, grok[xai]:grok-4.6@xhigh, claude[anthropic]:opus@xhigh

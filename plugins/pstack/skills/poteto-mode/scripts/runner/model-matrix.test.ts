@@ -27,7 +27,6 @@ const HARNESSES = ["claude", "codex", "grok", "pi"] as const;
 const DESCRIPTOR_RE =
   /(claude|codex|grok|pi)\[[a-zA-Z0-9][a-zA-Z0-9._-]*\]:[^\s,]+@(low|medium|high|xhigh|max)/g;
 const PANEL_ROLES = [
-  "how critics",
   "arena runners",
   "arena cross-judge pool",
   "architect runners",
@@ -42,7 +41,6 @@ const SHEET_ROLES = [
   "hardest tasks",
   "how explorer",
   "how explainer",
-  "how critics",
   "why investigators, synthesizer",
   "reflect tooling, judgment, divergent, synthesizer",
   "arena runners",
