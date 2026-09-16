@@ -552,7 +552,7 @@ function handleError(error: unknown, program: Command, io: Io): number {
   }
   io.stderr(`error: ${message(error)}\n`);
   if (error instanceof UsageError) {
-    io.stderr(program.helpInformation());
+    io.stderr("try: orch --help\n");
   }
   return 1;
 }
