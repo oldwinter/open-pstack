@@ -99,6 +99,7 @@ describe("parseArgs", () => {
       expect(await main(argv, harness.runtime)).toBe(64);
       expect(harness.stdout).toEqual([]);
       expect(harness.stderr.join("")).toContain("error:");
+      expect(harness.stderr.join("")).toContain("See: watch-pr --help");
     }
   });
 });
@@ -161,6 +162,7 @@ describe("main", () => {
     expect(harness.stderr.join("")).toContain(
       "option '--interval <seconds>' argument '0' is invalid"
     );
+    expect(harness.stderr.join("")).toContain("See: watch-pr --help");
   });
 
   it("bypasses the queue machine for queued-stack status-only", async () => {
@@ -219,6 +221,7 @@ describe("main", () => {
     const harness = testRuntime(reader);
     expect(await main(["--help"], harness.runtime)).toBe(0);
     expect(harness.stdout.join("")).toContain("JSON (NDJSON while polling)");
+    expect(harness.stderr.join("")).not.toContain("See: watch-pr --help");
     expect(reader.calls).toEqual([]);
   });
 });

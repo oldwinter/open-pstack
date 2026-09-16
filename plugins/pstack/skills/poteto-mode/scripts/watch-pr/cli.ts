@@ -179,7 +179,9 @@ export async function main(
     options = parseArgs(argv, runtime);
   } catch (error) {
     if (!(error instanceof CommanderError)) throw error;
-    return error.exitCode === 0 ? 0 : 64;
+    if (error.exitCode === 0) return 0;
+    runtime.stderr("See: watch-pr --help\n");
+    return 64;
   }
   const render = options.pretty ? renderPretty : renderJson;
   const emit = (verdict: T.ProgressVerdict): void =>
