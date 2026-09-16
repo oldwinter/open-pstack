@@ -585,6 +585,9 @@ describe("check-plan", () => {
     const result = runNode([]);
     expect(result.status).toBe(2);
     expect(result.stderr).toContain("Usage: node check-plan.mjs <plan.md>");
+    expect(result.stderr).toContain(
+      "try: node check-plan.mjs ../playbooks/multi-phase-plan.md",
+    );
   });
 
   it("CLI exits 2 when extra arguments are present", async () => {
@@ -592,6 +595,32 @@ describe("check-plan", () => {
     const result = runNode([file, "extra"]);
     expect(result.status).toBe(2);
     expect(result.stderr).toContain("Usage: node check-plan.mjs <plan.md>");
+    expect(result.stdout).toBe("");
+  });
+
+  it.each(["--help", "-h"] as const)(
+    "CLI treats %s as usage, not a plan path",
+    (flag) => {
+      const result = runNode([flag]);
+      expect(result.status).toBe(2);
+      expect(result.stderr).toContain("Usage: node check-plan.mjs <plan.md>");
+      expect(result.stderr).toContain(
+        "try: node check-plan.mjs ../playbooks/multi-phase-plan.md",
+      );
+      expect(result.stderr).not.toContain("ENOENT");
+      expect(result.stderr).not.toMatch(/no such file or directory/i);
+      expect(result.stdout).toBe("");
+    },
+  );
+
+  it("CLI treats --help with extra arguments as usage", () => {
+    const result = runNode(["--help", "plan.md"]);
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain("Usage: node check-plan.mjs <plan.md>");
+    expect(result.stderr).toContain(
+      "try: node check-plan.mjs ../playbooks/multi-phase-plan.md",
+    );
+    expect(result.stderr).not.toContain("ENOENT");
     expect(result.stdout).toBe("");
   });
 

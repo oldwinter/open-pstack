@@ -728,20 +728,37 @@ export function extractSkeleton(playbookRaw) {
   return `${lines.slice(start + 1, end).join("\n")}\n`;
 }
 
+const USAGE = "Usage: node check-plan.mjs <plan.md>";
+const TRY =
+  "try: node check-plan.mjs ../playbooks/multi-phase-plan.md";
+
 function isCliEntry() {
   const entry = process.argv[1];
   if (!entry) return false;
   return fileURLToPath(import.meta.url) === fs.realpathSync(resolve(entry));
 }
 
+/**
+ * @param {string} value
+ */
+function isHelpFlag(value) {
+  return value === "--help" || value === "-h";
+}
+
+function printUsage() {
+  console.error(USAGE);
+  console.error(TRY);
+}
+
 function main() {
-  if (process.argv.length !== 3) {
-    console.error("Usage: node check-plan.mjs <plan.md>");
+  const args = process.argv.slice(2);
+  if (args.some(isHelpFlag) || args.length !== 1) {
+    printUsage();
     process.exit(2);
   }
-  const file = process.argv[2];
+  const file = args[0];
   if (!file) {
-    console.error("Usage: node check-plan.mjs <plan.md>");
+    printUsage();
     process.exit(2);
   }
   let raw;
