@@ -56,8 +56,29 @@ def merge_three_way(port, old, new):
         ).returncode
 
 
+def load_audit(audit_path):
+    try:
+        with open(audit_path) as handle:
+            audit = json.load(handle)
+    except OSError as error:
+        return None, f"cannot read audit: {error}"
+    except json.JSONDecodeError as error:
+        return None, f"invalid audit JSON: {error}"
+    try:
+        audit["upstream_base"], audit["upstream_target"], audit["changes"]
+        audit["port_commit"]
+    except (KeyError, TypeError):
+        return None, "audit is missing required fields"
+    if not isinstance(audit["changes"], list):
+        return None, "audit is missing required fields"
+    return audit, None
+
+
 def main(audit_path):
-    audit = json.load(open(audit_path))
+    audit, error = load_audit(audit_path)
+    if error:
+        print(error, file=sys.stderr)
+        return 2
     base, target = audit["upstream_base"], audit["upstream_target"]
     mapped = [c for c in audit["changes"] if c["port_path"] is not None]
     drift = refuse_drift(audit, [c["port_path"] for c in mapped])
@@ -114,4 +135,7 @@ def main(audit_path):
 
 
 if __name__ == "__main__":
+    if len(sys.argv) != 2:
+        print("usage: python3 scripts/upstream-merge.py audit.json", file=sys.stderr)
+        sys.exit(2)
     sys.exit(main(sys.argv[1]))
