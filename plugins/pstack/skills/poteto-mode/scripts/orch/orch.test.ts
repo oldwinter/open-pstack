@@ -554,6 +554,8 @@ describe("orch CLI", () => {
     const invalid = runCli(["--store", directory, "unit", "add", "u1"]);
     expect(invalid.code).toBe(1);
     expect(invalid.stderr).toContain("required option '--track <track>'");
+    expect(invalid.stderr).toContain("Usage:");
+    expect(invalid.stderr).not.toContain("try: orch --help");
   });
 
   it("accepts ORCH_STORE and emits complete JSON", async () => {
@@ -591,6 +593,16 @@ describe("orch CLI", () => {
     expect(missingRepo.stderr).toContain(
       "set --repo <dir> or ORCH_REPO"
     );
+    expect(missingRepo.stderr).toContain("try: orch --help");
+    expect(missingRepo.stderr).not.toContain("Usage: orch");
+    expect(missingRepo.stderr).not.toContain("Commands:");
+
+    const missingStore = runCli(["frontier", "set"]);
+    expect(missingStore.code).toBe(1);
+    expect(missingStore.stderr).toContain("set --store <dir> or ORCH_STORE");
+    expect(missingStore.stderr).toContain("try: orch --help");
+    expect(missingStore.stderr).not.toContain("Usage: orch");
+    expect(missingStore.stderr).not.toContain("Commands:");
 
     const userError = runCli([
       "--store",
