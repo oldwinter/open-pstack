@@ -3,8 +3,20 @@
 # Usage: log.sh <logfile> <phase> <decision> <why> <evidence> <result>
 set -euo pipefail
 
-if [ "$#" -ne 6 ]; then
+usage() {
 	printf 'usage: log.sh <logfile> <phase> <decision> <why> <evidence> <result>\n' >&2
+	printf 'try: log.sh decisions.tsv frame decided because evidence accepted\n' >&2
+}
+
+for arg in "$@"; do
+	if [ "$arg" = "--help" ] || [ "$arg" = "-h" ]; then
+		usage
+		exit 2
+	fi
+done
+
+if [ "$#" -ne 6 ]; then
+	usage
 	exit 1
 fi
 
