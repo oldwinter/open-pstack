@@ -15,8 +15,24 @@ if "%~1"=="" (
     echo run-hook.cmd: missing script name >&2
     exit /b 1
 )
+if "%~1"=="." (
+    echo run-hook.cmd: invalid script name >&2
+    exit /b 1
+)
+if "%~1"==".." (
+    echo run-hook.cmd: invalid script name >&2
+    exit /b 1
+)
+if not "%~1"=="%~nx1" (
+    echo run-hook.cmd: invalid script name >&2
+    exit /b 1
+)
 
 set "HOOK_DIR=%~dp0"
+if not exist "%HOOK_DIR%%~1" (
+    echo run-hook.cmd: hook script not found: %~1 >&2
+    exit /b 1
+)
 
 REM Try Git for Windows bash in standard locations
 if exist "C:\Program Files\Git\bin\bash.exe" (
@@ -40,8 +56,22 @@ REM (plugin still works, just without SessionStart context injection)
 exit /b 0
 CMDBLOCK
 
-# Unix: run the named script directly
+# Unix: validate and run one direct-child hook script.
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+if [ "$#" -eq 0 ]; then
+    echo "run-hook.cmd: missing script name" >&2
+    exit 1
+fi
 SCRIPT_NAME="$1"
+case "$SCRIPT_NAME" in
+    ""|"."|".."|*/*|*\\*)
+        echo "run-hook.cmd: invalid script name" >&2
+        exit 1
+        ;;
+esac
+if [ ! -f "${SCRIPT_DIR}/${SCRIPT_NAME}" ]; then
+    echo "run-hook.cmd: hook script not found: ${SCRIPT_NAME}" >&2
+    exit 1
+fi
 shift
 exec bash "${SCRIPT_DIR}/${SCRIPT_NAME}" "$@"

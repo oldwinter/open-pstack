@@ -5,6 +5,7 @@ REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PROBE="$REPO_ROOT/scripts/upstream-merge-probe.py"
 MERGE="$REPO_ROOT/scripts/upstream-merge.py"
 AUDIT="$REPO_ROOT/scripts/upstream-audit.py"
+HOOK="$REPO_ROOT/plugins/pstack/hooks/run-hook.cmd"
 
 fail() {
   echo "FAIL: $*" >&2
@@ -78,5 +79,23 @@ set -e
 [[ -z "$(git -C "$scope_tree" status --porcelain -- README.md)" ]] || fail "out-of-scope merge path changed README.md"
 cleanup_scope
 trap - EXIT
+
+set +e
+hook_missing_output=$("$HOOK" 2>&1)
+hook_missing_status=$?
+hook_traversal_output=$(PSTACK_STATIC_ONLY=1 "$HOOK" ../../../tests/skill-collision-repro.sh 2>&1)
+hook_traversal_status=$?
+hook_unknown_output=$("$HOOK" no-such-hook 2>&1)
+hook_unknown_status=$?
+set -e
+
+[[ "$hook_missing_status" -eq 1 ]] || fail "missing hook name exited $hook_missing_status instead of 1"
+[[ "$hook_missing_output" == *"missing script name"* ]] || fail "missing hook name lacked a wrapper error"
+[[ "$hook_traversal_status" -eq 1 ]] || fail "traversal hook name exited $hook_traversal_status instead of 1"
+[[ "$hook_traversal_output" == *"invalid script name"* ]] || fail "traversal hook name lacked a boundary error"
+[[ "$hook_unknown_status" -eq 1 ]] || fail "unknown hook name exited $hook_unknown_status instead of 1"
+[[ "$hook_unknown_output" == *"hook script not found"* ]] || fail "unknown hook name lacked a not-found error"
+valid_hook_output=$("$HOOK" session-start)
+[[ "$valid_hook_output" == *"<EXTREMELY_IMPORTANT>"* ]] || fail "valid hook did not run session-start"
 
 echo "Upstream script CLI boundaries passed"
