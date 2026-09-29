@@ -166,7 +166,11 @@ export function resolveProviderEnvironment(
   for (const key of CLAUDE_PROVIDER_ENV_KEYS) {
     if (!(key in settingsEnv)) continue;
     const value = settingsEnv[key];
-    if (typeof value !== "string" || value.length === 0 || value.includes("\0")) {
+    if (
+      typeof value !== "string" ||
+      value.trim().length === 0 ||
+      value.includes("\0")
+    ) {
       return invalidClaudeConfiguration(`Claude user settings ${key} must be a non-empty string`);
     }
     projection.set(key, value);

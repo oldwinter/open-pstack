@@ -1244,6 +1244,30 @@ describe("runLane", () => {
 });
 
 describe("childEnvironment", () => {
+  it("rejects a whitespace-only Claude credential from user settings", () => {
+    const settingsDir = join(scratch, ".claude");
+    mkdirSync(settingsDir);
+    writeFileSync(
+      join(settingsDir, "settings.json"),
+      JSON.stringify({ env: { ANTHROPIC_AUTH_TOKEN: "   " } })
+    );
+    const resolved = resolveProviderEnvironment(
+      "codex",
+      {
+        harness: "claude",
+        apiProvider: "anthropic",
+        model: "fable",
+        effort: "max",
+      },
+      { HOME: scratch, ANTHROPIC_AUTH_TOKEN: "ambient-valid" }
+    );
+
+    expect(resolved).toMatchObject({
+      kind: "invalid",
+      message: "Claude user settings ANTHROPIC_AUTH_TOKEN must be a non-empty string",
+    });
+  });
+
   it("freezes each resolved provider environment snapshot", () => {
     const resolved = resolveProviderEnvironment(
       "codex",
