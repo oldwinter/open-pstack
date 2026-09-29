@@ -522,6 +522,20 @@ describe("Store", () => {
     await expect(store.frontier.show()).rejects.toThrow(
       "frontier.json has an invalid shape"
     );
+    await writeFile(
+      join(directory, "frontier.json"),
+      `${JSON.stringify({
+        generation: 1,
+        prs: [
+          { pr: 1, branches: "one", sha: "abc", state: "OPEN" },
+          { pr: 1, branches: "two", sha: "def", state: "OPEN" },
+        ],
+        lowestUnmerged: -7,
+      })}\n`
+    );
+    await expect(store.frontier.show()).rejects.toThrow(
+      "frontier.json has invalid frontier invariants"
+    );
 
     await writeFile(join(directory, "inbox", "bad.tsv"), "too\tshort\n");
     await expect(store.inbox.peek()).rejects.toThrow(
