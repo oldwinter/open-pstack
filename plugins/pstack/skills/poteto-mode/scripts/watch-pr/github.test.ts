@@ -2,6 +2,7 @@ import { describe, expect, it } from "bun:test";
 import {
   ChecksUnavailable,
   WatcherQueryError,
+  collectReviewThreads,
   mapRollupNode,
   orderStack,
   parsePullRequest,
@@ -254,6 +255,55 @@ it("annotates Bugbot threads with distinct review-pass counts", () => {
   expect(threads).toHaveLength(2);
   expect(threads.map((thread) => thread.isBugbot)).toEqual([true, true]);
   expect(threads.map((thread) => thread.bugbotReviewPasses)).toEqual([3, 3]);
+});
+
+it("collects unresolved review threads from every GraphQL page", async () => {
+  const calls: (string | null)[] = [];
+  const thread = (id: string) => ({
+    id,
+    isResolved: false,
+    comments: { nodes: [] },
+  });
+  const pages = new Map<string | null, unknown>([
+    [
+      null,
+      {
+        data: {
+          repository: {
+            pullRequest: {
+              reviewThreads: {
+                nodes: [thread("first")],
+                pageInfo: { hasNextPage: true, endCursor: "next" },
+              },
+            },
+          },
+        },
+      },
+    ],
+    [
+      "next",
+      {
+        data: {
+          repository: {
+            pullRequest: {
+              reviewThreads: {
+                nodes: [thread("second")],
+                pageInfo: { hasNextPage: false, endCursor: null },
+              },
+            },
+          },
+        },
+      },
+    ],
+  ]);
+
+  const threads = await collectReviewThreads(async (after) => {
+    calls.push(after);
+    return pages.get(after);
+  });
+
+  expect(threads.map((item) => item.id)).toEqual(["first", "second"]);
+  expect(calls).toEqual([null, "next"]);
 });
 
 describe("context and stack discovery", () => {
