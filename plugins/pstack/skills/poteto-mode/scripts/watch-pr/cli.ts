@@ -31,27 +31,38 @@ export interface CliOptions {
   readonly pretty: boolean;
   readonly polling: T.PollingOptions;
 }
+const DECIMAL_NUMBER = /^(?:0|[1-9]\d*)(?:\.\d+)?$/;
+const POSITIVE_INTEGER = /^[1-9]\d*$/;
 function positiveNumber(value: string): number {
+  if (!DECIMAL_NUMBER.test(value))
+    throw new InvalidArgumentError("must be a decimal number greater than zero");
   const parsed = Number(value);
   if (!Number.isFinite(parsed) || parsed <= 0)
     throw new InvalidArgumentError("must be greater than zero");
   return parsed;
 }
 function nonNegativeNumber(value: string): number {
+  if (!DECIMAL_NUMBER.test(value))
+    throw new InvalidArgumentError("must be a decimal number zero or greater");
   const parsed = Number(value);
   if (!Number.isFinite(parsed) || parsed < 0)
     throw new InvalidArgumentError("must be zero or greater");
   return parsed;
 }
 function positiveInteger(value: string): number {
+  if (!POSITIVE_INTEGER.test(value))
+    throw new InvalidArgumentError("must be a positive decimal integer");
   const parsed = Number(value);
   if (!Number.isInteger(parsed) || parsed <= 0)
     throw new InvalidArgumentError("must be a positive integer");
   return parsed;
 }
 function prNumber(value: string): T.PrNumber {
+  const normalized = value.replace(/^#/, "");
+  if (!POSITIVE_INTEGER.test(normalized))
+    throw new InvalidArgumentError("must be a positive integer");
   try {
-    return parsePrNumber(Number(value.replace(/^#/, "")));
+    return parsePrNumber(Number(normalized));
   } catch {
     throw new InvalidArgumentError("must be a positive integer");
   }

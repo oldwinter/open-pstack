@@ -716,6 +716,13 @@ function parseFrontier(raw: string): Frontier {
       state,
     });
   }
+  const expectedLowest = prs.find((row) => row.state === "OPEN")?.pr ?? null;
+  if (
+    new Set(prs.map((row) => row.pr)).size !== prs.length ||
+    value.lowestUnmerged !== expectedLowest
+  ) {
+    throw new UserError("frontier.json has invalid frontier invariants");
+  }
   return {
     generation: value.generation,
     prs,

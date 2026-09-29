@@ -37,8 +37,22 @@ parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("--port", default="origin/main", help="Port commit to inspect")
 parser.add_argument("--upstream", default="cursor/main", help="Upstream target commit")
 args = parser.parse_args()
-port = git("rev-parse", "--verify", args.port + "^{commit}").decode().strip()
-target = git("rev-parse", "--verify", args.upstream + "^{commit}").decode().strip()
+
+
+def commit_ref(value, label):
+    result = subprocess.run(
+        ["git", "rev-parse", "--verify", value + "^{commit}"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        parser.error(f"{label} ref {value!r} is not a commit")
+    return result.stdout.strip()
+
+
+port = commit_ref(args.port, "port")
+target = commit_ref(args.upstream, "upstream")
 sync_doc = git("show", port + ":UPSTREAM.md").decode()
 match = re.search(r"^\| Commit \| `([0-9a-f]{40})` \|$", sync_doc, re.MULTILINE)
 if not match:
