@@ -14,6 +14,7 @@ clean, so an audit never overwrites work done after it was taken.
 import argparse
 import json
 import os
+from pathlib import PurePosixPath
 import subprocess
 import sys
 import tempfile
@@ -57,9 +58,23 @@ def merge_three_way(port, old, new):
         ).returncode
 
 
+def valid_port_path(path):
+    if not isinstance(path, str) or not path or "\\" in path:
+        return False
+    parsed = PurePosixPath(path)
+    if parsed.is_absolute() or ".." in parsed.parts:
+        return False
+    return path == "README-UPSTREAM.md" or path.startswith("plugins/pstack/")
+
+
 def main(audit_path):
     audit = json.load(open(audit_path))
     base, target = audit["upstream_base"], audit["upstream_target"]
+    for change in audit["changes"]:
+        port = change["port_path"]
+        if port is not None and not valid_port_path(port):
+            print(f"refusing to run: outside the mapped port tree: {port}")
+            return 2
     mapped = [c for c in audit["changes"] if c["port_path"] is not None]
     drift = refuse_drift(audit, [c["port_path"] for c in mapped])
     if drift:
