@@ -11,6 +11,7 @@ clean, so an audit never overwrites work done after it was taken.
     python3 scripts/upstream-audit.py --port <sha> --upstream <sha> > audit.json
     python3 scripts/upstream-merge.py audit.json
 """
+import argparse
 import json
 import os
 import subprocess
@@ -114,4 +115,7 @@ def main(audit_path):
 
 
 if __name__ == "__main__":
-    sys.exit(main(sys.argv[1]))
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("audit", help="audit JSON produced by upstream-audit.py")
+    arguments = parser.parse_args()
+    sys.exit(main(arguments.audit))

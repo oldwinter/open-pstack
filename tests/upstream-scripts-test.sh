@@ -3,6 +3,7 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PROBE="$REPO_ROOT/scripts/upstream-merge-probe.py"
+MERGE="$REPO_ROOT/scripts/upstream-merge.py"
 
 fail() {
   echo "FAIL: $*" >&2
@@ -20,5 +21,14 @@ set -e
 
 help_output=$(python3 "$PROBE" --help)
 [[ "$help_output" == *"audit JSON produced by upstream-audit.py"* ]] || fail "help omitted the audit argument"
+
+set +e
+merge_missing_output=$(python3 "$MERGE" 2>&1)
+merge_missing_status=$?
+set -e
+
+[[ "$merge_missing_status" -eq 2 ]] || fail "merge missing audit path exited $merge_missing_status instead of 2"
+[[ "$merge_missing_output" == *"usage:"* ]] || fail "merge missing audit path did not print usage"
+[[ "$merge_missing_output" != *"Traceback"* ]] || fail "merge missing audit path printed a traceback"
 
 echo "Upstream script CLI boundaries passed"
