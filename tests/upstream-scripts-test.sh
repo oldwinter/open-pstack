@@ -4,6 +4,7 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PROBE="$REPO_ROOT/scripts/upstream-merge-probe.py"
 MERGE="$REPO_ROOT/scripts/upstream-merge.py"
+AUDIT="$REPO_ROOT/scripts/upstream-audit.py"
 
 fail() {
   echo "FAIL: $*" >&2
@@ -30,5 +31,14 @@ set -e
 [[ "$merge_missing_status" -eq 2 ]] || fail "merge missing audit path exited $merge_missing_status instead of 2"
 [[ "$merge_missing_output" == *"usage:"* ]] || fail "merge missing audit path did not print usage"
 [[ "$merge_missing_output" != *"Traceback"* ]] || fail "merge missing audit path printed a traceback"
+
+set +e
+invalid_ref_output=$(python3 "$AUDIT" --port does-not-exist --upstream also-missing 2>&1)
+invalid_ref_status=$?
+set -e
+
+[[ "$invalid_ref_status" -eq 2 ]] || fail "invalid audit ref exited $invalid_ref_status instead of 2"
+[[ "$invalid_ref_output" == *"port ref 'does-not-exist' is not a commit"* ]] || fail "invalid audit ref did not identify the port ref"
+[[ "$invalid_ref_output" != *"Traceback"* ]] || fail "invalid audit ref printed a traceback"
 
 echo "Upstream script CLI boundaries passed"
