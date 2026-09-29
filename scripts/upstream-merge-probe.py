@@ -7,6 +7,7 @@ and relabeled variants through the merge, and asserts what changed on disk.
     python3 scripts/upstream-audit.py --port <sha> --upstream <sha> > audit.json
     python3 scripts/upstream-merge-probe.py audit.json
 """
+import argparse
 import copy
 import json
 import os
@@ -133,4 +134,7 @@ def main(audit_path):
 
 
 if __name__ == "__main__":
-    sys.exit(main(sys.argv[1]))
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("audit", help="audit JSON produced by upstream-audit.py")
+    arguments = parser.parse_args()
+    sys.exit(main(arguments.audit))
